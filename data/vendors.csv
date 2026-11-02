@@ -1,0 +1,9 @@
+vendor_id,legal_name,aliases,tax_id,status,bank_last4,callback_phone,date_format
+V-1001,Northwind Industrial Supply LLC,northwind industrial;northwind supply,84-2291047,approved,4471,+1 555 0142,MDY
+V-1002,Meridian Facilities Services Inc,meridian facilities,47-1185520,approved,2093,+1 555 0117,
+V-1003,Apex Packaging Co,apex packaging,36-7740912,approved,6158,+1 555 0163,
+V-1004,Cedar Ridge Logistics LLC,cedar ridge logistics,52-9038114,approved,7702,+1 555 0188,
+V-1005,Harbor Office Supply Inc,harbor office supply;harbor office,27-5561390,approved,3340,+1 555 0129,
+V-1006,Lakeshore Electrical Contractors Inc,lakeshore electrical,61-2207745,approved,8816,+1 555 0174,
+V-1007,Brightline Staffing Group LLC,brightline staffing,73-4410268,blocked,5527,+1 555 0151,
+V-1008,Summit Test Labs Inc,summit test labs,19-8827361,onboarding,,+1 555 0196,

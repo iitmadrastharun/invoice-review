@@ -1,0 +1,12 @@
+{
+  "amount_pct": "0.02",
+  "amount_cap": "250.00",
+  "arith_cents": "0.02",
+  "tax_rate_points": "0.0025",
+  "near_dup_days": 14,
+  "near_dup_amount": "1.00",
+  "dup_number_min_chars": 4,
+  "max_invoice_age_days": 180,
+  "buyer_name": "Halden Manufacturing Inc",
+  "buyer_tax_id": "91-3304418"
+}
