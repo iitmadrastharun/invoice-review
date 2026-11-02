@@ -91,7 +91,7 @@ def template(run, kind, to, vendor):
         return {"subject": f"Invoice {number} cannot be processed", "body": body}
     ask = first["action"]
     body = f"Invoice {number} is on hold. {what}\n\n{ask}\n\nOnce this is sorted out, the invoice goes back into the next payment run."
-    return {"subject": f"Invoice {number} on hold: {CODE_NAMES.get(first.get('code', ''), 'action needed').lower()}", "body": body}
+    return {"subject": f"Invoice {number} on hold ({CODE_NAMES.get(first.get('code', ''), 'action needed')})", "body": body}
 
 
 def draft(run, vendor, po, policy):
