@@ -31,7 +31,7 @@ A tired person on a busy day misses these. A tool that only extracts fields does
 
 ## How the value is measured
 
-The overview estimates time given back from two assumptions in `data/policy.json`: 12 minutes per invoice by hand, and 5 minutes to settle a hold. **These are placeholders, not measurements.** In a pilot, replace them with the team's own timings.
+The overview only shows counts from real runs: how many were checked, approved with no one touching them, waiting, and the rupee value of each. It does not estimate time saved, because there is no real timing data to base it on.
 
 Measure in a pilot:
 
@@ -50,7 +50,7 @@ Measure in a pilot:
 ## What it does not do yet
 
 - No line-item matching: receipts are compared by value, not item by item.
-- One currency, one company, no tax engine.
+- One currency (INR), one company. GST is checked as a single rate against the PO; there is no CGST/SGST split or GSTR-2B reconciliation.
 - The field reader is tested on three invoice layouts. New layouts mostly hold rather than misread, but that needs proving on real volume. That's what shadow mode is for.
 - No logins, roles or approval limits per person.
 - The inbox is a folder of email files standing in for a real mailbox connection.

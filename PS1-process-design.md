@@ -1,5 +1,7 @@
 # PS-1 Invoice Process: Design
 
+> This is the original design, written with US vendors and dollar amounts. The app now uses made-up Indian vendors, rupees and 18% GST (amounts are 100 times larger); the rules are unchanged.
+
 **In:** one PDF invoice. **Out:** APPROVE, HOLD or REJECT for the AP clerk, with the reason, the numbers, the rule codes, the next step and every stage visible.
 
 **The idea in one line for the interviewer:** rules decide, AI only reads scans, and nothing is approved unless every required check actually ran and passed.

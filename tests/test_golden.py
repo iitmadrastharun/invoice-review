@@ -12,8 +12,8 @@ LIVE = ROOT / "samples" / "live"
 HISTORY = ROOT / "samples" / "history"
 TODAY = date(2026, 11, 3)
 GOOD_READ = {
-    "vendor_name": "Cedar Ridge Logistics LLC", "tax_id": "52-9038114", "invoice_number": "CR-5520", "invoice_date": "2026-10-22", "po_number": "PO-4810",
-    "subtotal": "6200.00", "tax": "496.00", "total": "6696.00", "currency": "USD", "bank_last4": "7702", "document_type": "invoice",
+    "vendor_name": "Godavari Logistics LLP", "tax_id": "36AALFG7702L1Z9", "invoice_number": "GL/26-27/5520", "invoice_date": "2026-10-22", "po_number": "PO-4810",
+    "subtotal": "620000.00", "tax": "111600.00", "total": "731600.00", "currency": "INR", "bank_last4": "7702", "document_type": "invoice",
 }
 
 
@@ -47,11 +47,11 @@ def rerun(previous, today=TODAY, **values):
 
 def test_history_replay():
     rows = {r["file_name"]: r for r in store.list_runs("nobody")}
-    assert rows["MF-1101.pdf"]["decision"] == "APPROVE"
-    assert rows["MF-1102.pdf"]["decision"] == "APPROVE"
-    assert rows["AP-7781.pdf"]["decision"] == "APPROVE"
-    assert rows["BK-300.pdf"]["decision"] == "REJECT"
-    assert rows["BK-300.pdf"]["codes"][0] == "RJ-VENDOR"
+    assert rows["MFS-1101.pdf"]["decision"] == "APPROVE"
+    assert rows["MFS-1102.pdf"]["decision"] == "APPROVE"
+    assert rows["API-7781.pdf"]["decision"] == "APPROVE"
+    assert rows["PMS-0300.pdf"]["decision"] == "REJECT"
+    assert rows["PMS-0300.pdf"]["codes"][0] == "RJ-VENDOR"
 
 
 @pytest.mark.parametrize("name,decision,code", [
@@ -78,14 +78,14 @@ def test_first_run_of_each_sample(name, decision, code):
 
 def test_happy_path_numbers():
     numbers = run(LIVE / "S1-happy.pdf")["result"]["numbers"]
-    assert numbers["limit"] == "12648.00" and numbers["after_this_invoice"] == "12465.00" and numbers["over_po_by"] == "65.00"
+    assert numbers["limit"] == "1264800.00" and numbers["after_this_invoice"] == "1246500.00" and numbers["over_po_by"] == "6500.00"
 
 
 def test_ec1_running_total():
     result = run(LIVE / "S2-split.pdf")["result"]
-    assert result["numbers"]["after_this_invoice"] == "40600.00"
-    assert result["numbers"]["over_limit_by"] == "350.00"
-    assert "7,750.00" in result["next_step"]["action"] and "350.00" in result["next_step"]["action"]
+    assert result["numbers"]["after_this_invoice"] == "4060000.00"
+    assert result["numbers"]["over_limit_by"] == "35000.00"
+    assert "₹7,75,000.00" in result["next_step"]["action"] and "₹35,000.00" in result["next_step"]["action"]
 
 
 def test_ec2_match_passes_and_duplicate_catches():
@@ -101,8 +101,8 @@ def test_ec2_match_passes_and_duplicate_catches():
 def test_ec4_billed_ahead_of_receipt():
     result = run(LIVE / "S9-receipt.pdf")["result"]
     assert result["codes"] == ["H-RECEIPT"]
-    assert result["numbers"]["received_to_date"] == "3200.00" and result["numbers"]["billed_after_this_invoice"] == "4800.00"
-    assert "S. Lindqvist" in result["next_step"]["action"]
+    assert result["numbers"]["received_to_date"] == "320000.00" and result["numbers"]["billed_after_this_invoice"] == "480000.00"
+    assert "K. Iyer" in result["next_step"]["action"]
 
 
 def test_same_invoice_twice_is_certain_reject_and_shows_file_notice():
@@ -128,14 +128,14 @@ def fields_of(name):
 
 def test_trap_a_total_column_is_not_the_total():
     fields = fields_of("S1-happy")
-    assert fields["total"] == {**fields["total"], "state": "FOUND", "value": "13462.20"}
-    assert fields["subtotal"]["value"] == "12465.00" and fields["tax"]["value"] == "997.20"
+    assert fields["total"] == {**fields["total"], "state": "FOUND", "value": "1470870.00"}
+    assert fields["subtotal"]["value"] == "1246500.00" and fields["tax"]["value"] == "224370.00"
     assert fields["bank_last4"]["value"] == "4471"
 
 
 def test_trap_b_each_value_under_its_own_label():
     fields = fields_of("S2-split")
-    assert fields["invoice_number"]["value"] == "MF-1103"
+    assert fields["invoice_number"]["value"] == "MFS/26-27/1103"
     assert fields["po_number"]["value"] == "PO-4620"
     assert fields["invoice_date"]["value"] == "2026-10-26"
     assert fields["bank_last4"]["value"] == "2093"  # "Customer Account No: 88120" must be ignored
@@ -163,8 +163,8 @@ def test_scan_ai_on_and_off_same_decision(monkeypatch):
 
 # --- Claude's independent second reading of text PDFs
 S1_READ = {
-    "vendor_name": "Northwind Industrial Supply LLC", "tax_id": "84-2291047", "invoice_number": "INV-00417", "invoice_date": "2026-10-26", "po_number": "PO-4501",
-    "subtotal": "12465.00", "tax": "997.20", "total": "13462.20", "currency": "USD", "bank_last4": "4471", "document_type": "invoice",
+    "vendor_name": "Kaveri Industrial Supplies Pvt Ltd", "tax_id": "33AABCK4471M1Z2", "invoice_number": "KIS/26-27/0417", "invoice_date": "2026-10-26", "po_number": "PO-4501",
+    "subtotal": "1246500.00", "tax": "224370.00", "total": "1470870.00", "currency": "INR", "bank_last4": "4471", "document_type": "invoice",
 }
 
 
@@ -186,12 +186,12 @@ def test_cross_check_agreeing_keeps_approve(monkeypatch):
 
 
 def test_cross_check_disagreeing_holds(monkeypatch):
-    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "total": "13426.20"}))
+    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "total": "1470780.00"}))
     result = run(LIVE / "S1-happy.pdf")
     assert result["decision"] == "HOLD" and result["codes"] == ["H-READ-DISAGREE"]
-    assert "13426.20" in result["result"]["summary"]
+    assert "1470780.00" in result["result"]["summary"]
     # the clerk checks the page, finds the rules were right, and approves with a note
-    pipeline.final_decision(result, "approve", "Checked the page: total is 13,462.20 as printed.")
+    pipeline.final_decision(result, "approve", "Checked the page: total is 14,70,870.00 as printed.")
     assert store.get_run(result["id"])["final_status"] == "approved by clerk"
 
 
@@ -205,9 +205,9 @@ def test_cross_check_failure_does_not_hold(monkeypatch):
 
 
 def test_cross_check_only_suggests_what_rules_left_blank(monkeypatch):
-    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "vendor_name": "Lakeshore Electrical Contractors Inc", "tax_id": "61-2207745",
-                                               "invoice_number": "LE-8810", "invoice_date": "2026-10-27", "po_number": "PO-4950",
-                                               "subtotal": "2800.00", "tax": "224.00", "total": "3024.00", "bank_last4": None}))
+    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "vendor_name": "Narmada Electricals Pvt Ltd", "tax_id": "24AADCN8816E1Z7",
+                                               "invoice_number": "NE/26-27/8810", "invoice_date": "2026-10-27", "po_number": "PO-4950",
+                                               "subtotal": "280000.00", "tax": "50400.00", "total": "330400.00", "bank_last4": None}))
     result = run(LIVE / "S8-implied.pdf")
     assert result["codes"][0] == "H-PO-NONE"  # a suggestion is never used as a value
     assert "PO-4950" in store.get_stages(result["id"])[3]["sentence"]
@@ -259,10 +259,10 @@ def test_drafts_go_to_the_right_person():
     vendors, pos, policy = store.load_master()
     s2 = run(LIVE / "S2-split.pdf")
     d = drafts.draft(s2, vendors["V-1002"], pos["PO-4620"], policy)
-    assert d["kind"] == "buyer" and "M. Okafor" in d["to"] and "350.00" in d["body"] and d["source"] == "template"
+    assert d["kind"] == "buyer" and "A. Mehta" in d["to"] and "35,000.00" in d["body"] and d["source"] == "template"
     s6 = run(LIVE / "S6-bank.pdf")
     d = drafts.draft(s6, vendors["V-1001"], pos["PO-4502"], policy)
-    assert d["kind"] == "call" and "+1 555 0142" in d["to"] and "phone number on file" in d["body"]
+    assert d["kind"] == "call" and "+91 44 4012 0142" in d["to"] and "phone number on file" in d["body"]
 
 
 def test_scan_ai_failure_gives_blank_form(monkeypatch):
@@ -279,7 +279,7 @@ def test_scan_ai_failure_gives_blank_form(monkeypatch):
 
 def test_ai_read_of_blocked_vendor_still_holds(monkeypatch):
     monkeypatch.setattr(ai_reader, "available", lambda: True)
-    monkeypatch.setattr(ai_reader, "read_scan", lambda *a: proposal(vendor_name="Brightline Staffing Group LLC", tax_id="73-4410268", po_number="PO-4300"))
+    monkeypatch.setattr(ai_reader, "read_scan", lambda *a: proposal(vendor_name="Prabhat Manpower Services Pvt Ltd", tax_id="29AAGCP5527H1Z3", po_number="PO-4300"))
     result = run(LIVE / "S4-scan.pdf")
     assert result["decision"] == "HOLD" and result["codes"][0] == "H-READ-AI"
     assert any("Preview only" in n for n in result["result"]["notes"])
@@ -287,14 +287,14 @@ def test_ai_read_of_blocked_vendor_still_holds(monkeypatch):
 
 def test_ai_misread_flagged_not_fixed(monkeypatch):
     monkeypatch.setattr(ai_reader, "available", lambda: True)
-    monkeypatch.setattr(ai_reader, "read_scan", lambda *a: proposal(total="6969.00"))
+    monkeypatch.setattr(ai_reader, "read_scan", lambda *a: proposal(total="713600.00"))
     result = run(LIVE / "S4-scan.pdf")
     assert result["decision"] == "HOLD"
-    assert result["fields"]["total"]["value"] == "6969.00" and result["fields"]["total"]["flag"]
+    assert result["fields"]["total"]["value"] == "713600.00" and result["fields"]["total"]["flag"]
 
 
-CLERK = dict(vendor="V-1004", invoice_number="CR-5520", invoice_date="2026-10-22", po_number="PO-4810", currency="USD",
-             subtotal="6,200.00", tax="496.00", total="6,696.00", bank_last4="7702", document_type="invoice")
+CLERK = dict(vendor="V-1004", invoice_number="GL/26-27/5520", invoice_date="2026-10-22", po_number="PO-4810", currency="INR",
+             subtotal="6,20,000.00", tax="1,11,600.00", total="7,31,600.00", bank_last4="7702", document_type="invoice")
 
 
 def test_scan_confirmed_by_clerk_approves():
@@ -337,7 +337,7 @@ def test_retyping_bank_gives_override_not_approve():
 
 
 def test_retyping_amounts_gives_override():
-    second = rerun(run(LIVE / "S2-split.pdf"), subtotal="7,750.00", tax="620.00", total="8,370.00")
+    second = rerun(run(LIVE / "S2-split.pdf"), subtotal="7,75,000.00", tax="1,39,500.00", total="9,14,500.00")
     assert second["decision"] == "HOLD" and second["codes"] == ["H-OVERRIDE"]
 
 
@@ -349,7 +349,7 @@ def test_retyping_date_gives_override():
 def test_rerun_with_no_change_refused():
     first = run(LIVE / "S2-split.pdf")
     with pytest.raises(pipeline.ClerkInputError):
-        rerun(first, total="8,748.00")
+        rerun(first, total="9,55,800.00")
 
 
 def test_entering_a_missing_value_can_approve():
@@ -360,12 +360,12 @@ def test_entering_a_missing_value_can_approve():
 # --- final decisions and the ledger
 def test_final_approve_counts_toward_po_and_makes_resend_reject():
     first = run(LIVE / "S2-split.pdf")
-    pipeline.final_decision(first, "approve", "Change order CO-77 confirmed by M. Okafor")
+    pipeline.final_decision(first, "approve", "Change order CO-77 confirmed by A. Mehta")
     assert store.get_run(first["id"])["final_status"] == "approved by clerk"
     resend = run(LIVE / "S2-split.pdf")
     assert resend["decision"] == "REJECT" and resend["codes"] == ["RJ-DUP"]
     rows = [r for r in store.ledger_rows("w1") if r["po_number"] == "PO-4620" and r["status"] == "APPROVED"]
-    assert sum(float(r["net"]) for r in rows) == 40600.00
+    assert sum(float(r["net"]) for r in rows) == 4060000.00
 
 
 def test_final_approve_needs_a_note():

@@ -17,21 +17,27 @@ LABELS = {
     "invoice_date": ["invoice date", "date of issue"],
     "po_number": ["po no", "po #", "po number", "purchase order no", "purchase order", "customer po", "po"],
     "subtotal": ["subtotal", "net amount", "net total"],
-    "tax": ["sales tax", "total tax", "tax", "vat", "gst"],
+    "tax": ["sales tax", "total tax", "igst", "gst", "tax", "vat"],
     "total": ["total due", "amount due", "balance due", "invoice total", "grand total", "total"],
 }
 BARE_DATE = ["date"]
 NEVER = ["due date", "po date", "order date", "ship date", "delivery date", "purchase order date", "tax id", "vat no",
-         "tax invoice", "po box", "order no", "customer no", "quote no", "account no", "total qty"]
+         "tax invoice", "gstin", "gst no", "po box", "order no", "customer no", "quote no", "account no", "total qty"]
 TABLE_WORDS = {"description", "item", "qty", "quantity", "unit", "price", "rate", "amount", "total"}
 BLOCK_LABELS = ["bill to", "ship to", "sold to", "deliver to", "attention", "customer"]
-TAX_ID_LABELS = ["tax id", "ein", "tin", "vat no"]
-AMOUNT_RE = re.compile(r"^(\d{1,3}(,\d{3})+|\d+)(\.\d{2})?$")
+TAX_ID_LABELS = ["gstin", "gst no", "tax id", "ein", "tin", "vat no"]
+# Western (1,234,567) or Indian (12,34,567) digit grouping.
+AMOUNT_RE = re.compile(r"^(\d{1,3}(,\d{3})+|\d{1,2}(,\d{2})+,\d{3}|\d+)(\.\d{2})?$")
 INCLUDED_RE = re.compile(r"\b(?:price|prices|total|amount|amounts)\s+(?:includes?|including|inclusive\s+of)\s+(\d+(?:\.\d+)?)\s*%\s*(?:sales\s+)?(?:tax|vat|gst)\b", re.I)
-BANK_TRIGGER_RE = re.compile(r"\b(bank|iban|swift|bic|routing|ach|wire)\b", re.I)
+BANK_TRIGGER_RE = re.compile(r"\b(bank|iban|swift|bic|routing|ach|wire|ifsc|neft|rtgs)\b", re.I)
 ACCOUNT_RE = re.compile(r"(\w+\s+)?\b(?:account\s*(?:no\.?|number|#)|acct\.?(?:\s*(?:no\.?|#))?|iban)\s*:?\s*([A-Za-z0-9*\-]+(?:\s\d{2,})*)", re.I)
 NOT_BANK_PREFIX = {"customer", "client", "your"}
 MONTHS = {m: i + 1 for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+
+
+def tax_key(tax_id):
+    """GSTINs mix letters and digits, so compare letters and digits, ignoring spacing and dashes."""
+    return re.sub(r"[^0-9A-Z]", "", str(tax_id).upper())
 
 
 def _norm(word):
@@ -136,7 +142,7 @@ def _value_words(lines, i, span, amount=False):
 
 def parse_amount(printed):
     """Returns a plain string such as 12465.00, or None if the format is not safely readable."""
-    text = re.sub(r"(USD|EUR|GBP|CAD|AUD|INR|CA\$|A\$|\$|€|£|₹)", "", printed).strip()
+    text = re.sub(r"(USD|EUR|GBP|CAD|AUD|INR|Rs\.?|CA\$|A\$|\$|€|£|₹)", "", printed).strip()
     negative = text.startswith("-") or (text.startswith("(") and text.endswith(")")) or text.endswith("-")
     text = text.strip("()-").strip()
     if not AMOUNT_RE.match(text):
@@ -290,13 +296,13 @@ def _match_vendor(lines, page_height, vendors, policy):
             if not words:
                 continue
             printed = words[0][4].strip(",;")
-            digits = re.sub(r"\D", "", printed)
-            if not digits or digits == re.sub(r"\D", "", policy["buyer_tax_id"]):
+            digits = tax_key(printed)
+            if not digits or digits == tax_key(policy["buyer_tax_id"]):
                 continue
             if digits not in tax_ids:
                 tax_ids.append(digits)
                 tax_rect = (line.page, _rect(words))
-    by_tax = [v["vendor_id"] for v in vendors.values() if re.sub(r"\D", "", v["tax_id"]) in tax_ids]
+    by_tax = [v["vendor_id"] for v in vendors.values() if tax_key(v["tax_id"]) in tax_ids]
 
     guess = zone[0] if zone else None
     if len(by_name) > 1:
@@ -328,7 +334,7 @@ def _currency(words):
             code = "EUR"
         elif "£" in text:
             code = "GBP"
-        elif "₹" in text:
+        elif "₹" in text or re.fullmatch(r"Rs\.?", text):
             code = "INR"
         if code:
             seen.setdefault(code, (word[-1], word))

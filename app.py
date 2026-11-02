@@ -24,15 +24,15 @@ MAX_BATCH_FILES = 25
 COOKIE = "workspace"
 
 SAMPLES = {
-    "S1-happy.pdf": "Northwind: clean invoice, small overage",
-    "S2-split.pdf": "Meridian: third invoice on a split PO",
-    "S3-resend.pdf": "Apex: similar to an invoice already approved",
-    "S4-scan.pdf": "Cedar Ridge: low-quality scan",
-    "S5-no-number.pdf": "Harbor: no invoice number printed",
-    "S6-bank.pdf": "Northwind: check the bank details",
-    "S7-embedded.pdf": "Harbor: one bundled line, tax inside the total",
-    "S8-implied.pdf": "Lakeshore: no PO printed",
-    "S9-receipt.pdf": "Apex: billed ahead of goods received",
+    "S1-happy.pdf": "Kaveri Industrial: clean invoice, small freight overage",
+    "S2-split.pdf": "Meenakshi Facility: third invoice on a split PO",
+    "S3-resend.pdf": "Ashoka Packaging: same bill sent again under a new number",
+    "S4-scan.pdf": "Godavari Logistics: low-quality scan",
+    "S5-no-number.pdf": "Sahyadri Office: no invoice number printed",
+    "S6-bank.pdf": "Kaveri Industrial: new bank account on the invoice",
+    "S7-embedded.pdf": "Sahyadri Office: one bundled line, GST inside the total",
+    "S8-implied.pdf": "Narmada Electricals: no PO printed",
+    "S9-receipt.pdf": "Ashoka Packaging: billed ahead of goods received",
 }
 
 
@@ -101,12 +101,14 @@ def health():
 
 @app.get("/api/config")
 def config():
-    vendors, _, _ = store.load_master()
+    vendors, _, policy = store.load_master()
     return {
         "ai_reader": ai_reader.available(),
         "samples": [{"file": k, "label": v} for k, v in SAMPLES.items()],
         "code_names": CODE_NAMES,
         "vendors": [{"id": v["vendor_id"], "name": v["legal_name"]} for v in vendors.values()],
+        "buyer": policy["buyer_name"],
+        "tolerance": {"pct": float(policy["amount_pct"]) * 100, "cap": policy["amount_cap"]},
     }
 
 
@@ -345,7 +347,7 @@ def _decided(request):
 @app.get("/api/export/approved.csv")
 def export_approved(request: Request):
     """A payment file for the ERP: approved invoices only, paid to the account on file, never the one printed."""
-    vendors, _, _ = store.load_master()
+    vendors, _, policy = store.load_master()
     out = io.StringIO()
     writer = csv.writer(out)
     writer.writerow(["vendor_id", "vendor_name", "invoice_number", "invoice_date", "po_number", "currency", "net", "tax", "gross",
@@ -359,7 +361,7 @@ def export_approved(request: Request):
         result = run["result"] or {}
         tax = Decimal(result["gross"]) - Decimal(result["net"]) if result.get("gross") and result.get("net") else ""
         writer.writerow([vendor.get("vendor_id", ""), vendor.get("legal_name", ""), value("invoice_number"), value("invoice_date"), value("po_number"),
-                         value("currency") or "USD", result.get("net"), tax, result.get("gross"), vendor.get("bank_last4", ""),
+                         value("currency") or policy.get("currency", "INR"), result.get("net"), tax, result.get("gross"), vendor.get("bank_last4", ""),
                          "person" if run["final_status"] == "approved by clerk" else "rules", run["clerk_note"] or "", run["id"]])
     name = f"approved-invoices-{date.today().isoformat()}.csv"
     return Response(out.getvalue(), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
@@ -367,8 +369,8 @@ def export_approved(request: Request):
 
 @app.get("/api/metrics")
 def metrics(request: Request):
-    """Figures for the overview. Time saved is an estimate from the assumptions in data/policy.json, shown with them."""
-    vendors, _, policy = store.load_master()
+    """Figures for the overview. Every number is counted from real runs; nothing is estimated."""
+    vendors, _, _ = store.load_master()
     decided = _decided(request)
     approved = [r for r in decided if (r["final_status"] or "").startswith("approved")]
     auto = [r for r in decided if r["final_status"] == "approved"]
@@ -390,10 +392,6 @@ def metrics(request: Request):
                 caught[code] += 1
     at_risk = sum(float((r["result"] or {}).get("gross") or 0) for r in decided
                   if set(r["codes"]) & {"RJ-DUP", "H-DUP-NUMBER", "H-DUP-NEAR", "H-VENDOR-BANK", "H-SENDER", "RJ-VENDOR"})
-    assumptions = policy.get("assumptions", {})
-    manual = float(assumptions.get("manual_minutes_per_invoice", 0))
-    review = float(assumptions.get("review_minutes_per_exception", 0))
-    minutes_saved = len(auto) * manual + (len(held) + len(rejected)) * max(manual - review, 0)
     durations = [r["duration_ms"] for r in decided if r["duration_ms"] is not None]
     return {
         "invoices": len(decided), "approved": len(approved), "auto_approved": len(auto), "held": len(held), "rejected": len(rejected),
@@ -404,7 +402,6 @@ def metrics(request: Request):
         "value_by_vendor": [{"vendor": v, "value": round(n, 2)} for v, n in value_by_vendor.most_common()],
         "caught": dict(caught),
         "median_seconds": round(sorted(durations)[len(durations) // 2] / 1000, 1) if durations else None,
-        "minutes_saved": round(minutes_saved), "assumptions": assumptions,
     }
 
 

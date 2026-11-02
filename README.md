@@ -4,7 +4,7 @@ Checks vendor invoices before they are paid. Each invoice comes in by email or u
 
 **The rule behind it:** rules decide, AI reads and double-checks, and nothing is approved unless every required check actually ran and passed. AI can stop a payment; it can never make one.
 
-All vendors, POs, emails and invoices are made up. No payment is ever made.
+The buyer is a made-up Pune auto-parts maker; vendors are made-up Indian suppliers with made-up GSTINs, and amounts are in rupees with 18% GST. All vendors, POs, emails and invoices are made up. No payment is ever made.
 
 **Live version:** https://invoice-review-mpwa.onrender.com. It runs on Render's free tier, so the first visit after a quiet spell can take about a minute to wake up. The hosted version has no AI: scans go straight to a form for a person to fill in, and text PDFs are read by the rules alone.
 
@@ -44,12 +44,12 @@ On macOS or Linux, use `.venv/bin/python` in place of `.venv\Scripts\python`.
 1. **Inbox:** nine vendor emails with PDFs attached. **Check all new emails** runs them as a batch, in arrival order.
 2. **Check invoices:** upload one PDF to watch it run, several to check them as a batch, or pick a sample.
 3. **Run view:** the ten stages, the decision, who acts next, and **Draft it** for the follow-up message or call note. On a hold, correct fields and re-run, or make a final decision with a note.
-4. **Overview:** straight-through rate, what's waiting, why invoices stop, value stopped, time saved (from stated assumptions), and the ERP payment file export.
+4. **Overview:** the five steps (receive, read, check, decide, pay) with live counts, what's waiting for a person and why, and the payment file export.
 5. **All runs:** every run, with search and filters. **Reset demo data** clears your own runs only.
 
 ## Where AI is used
 
-All through the local `claude -p` command, when it is installed and logged in and `READER_AI` is not `off`. The sidebar shows which applies.
+All through the local `claude -p` command, when it is installed and logged in and `READER_AI` is not `off`. The top bar shows which applies.
 
 - **Scans:** Claude proposes values, and a person confirms them before any decision counts.
 - **Text PDFs:** Claude reads the page independently, and a disagreement holds the invoice. It starts as soon as a file arrives, a few at a time, so a batch doesn't wait for each one. Readings are cached by file, and the cache survives restarts.
@@ -78,7 +78,7 @@ All through the local `claude -p` command, when it is installed and logged in an
 | `engine/inbox.py` | Reads the `.eml` files that stand in for the AP mailbox |
 | `engine/drafts.py` | The follow-up message: Claude, or a fixed template |
 | `engine/store.py` | SQLite: runs, stages, changes, ledger, drafts, AI cache |
-| `data/` | Vendor master, POs, goods receipts, tolerance policy and time-saved assumptions |
+| `data/` | Vendor master (with GSTINs), POs, goods receipts and the tolerance policy |
 | `samples/` | History invoices, live samples and the inbox emails |
 | `make_samples.py` | Rebuilds every sample PDF and email |
 | `DEMO.md` | Five-minute walkthrough and interview checklist |

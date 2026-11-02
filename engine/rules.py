@@ -59,7 +59,13 @@ def cents(value):
 
 
 def fmt(value):
-    return f"{cents(D(value)):,.2f}"
+    """Indian digit grouping with the rupee sign: ₹12,46,500.00."""
+    value = cents(D(value))
+    sign, whole, paise = "-" if value < 0 else "", f"{abs(value):.2f}".split(".")[0], f"{abs(value):.2f}".split(".")[1]
+    head, tail = whole[:-3], whole[-3:]
+    while len(head) > 2:
+        tail, head = f"{head[-2:]},{tail}", head[:-2]
+    return f"{sign}₹{head + ',' if head else ''}{tail}.{paise}"
 
 
 def normalise_number(number):

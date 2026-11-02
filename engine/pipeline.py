@@ -382,7 +382,7 @@ def _proposal_to_fields(proposal, vendors):
     vendor_name, tax_id = take("vendor_name"), take("tax_id")
     match = None
     for vendor in vendors.values():
-        if tax_id and re.sub(r"\D", "", vendor["tax_id"]) == re.sub(r"\D", "", tax_id):
+        if tax_id and extract.tax_key(vendor["tax_id"]) == extract.tax_key(tax_id):
             match = vendor
         elif vendor_name and not tax_id and vendor["legal_name"].lower() == vendor_name.lower():
             match = vendor
@@ -569,11 +569,11 @@ def final_decision(run, decision, note, who="AP clerk"):
 
 
 def approve_blockers(run):
-    """Why Final Approve is not allowed, or None. Empty or non-USD invoices must not enter the ledger."""
+    """Why Final Approve is not allowed, or None. Empty or foreign-currency invoices must not enter the ledger."""
     if run["read_source"] not in ("text_layer", "clerk_entered"):
         return "Enter the missing fields first. An invoice nobody has read cannot be approved."
     if {"H-CURRENCY", "H-DOC"} & set(run["codes"]):
-        return "A non-USD amount or a non-invoice must not enter a USD running total. Correct it or reject it."
+        return "A foreign-currency amount or a non-invoice must not enter a rupee running total. Correct it or reject it."
     vendors, _, _ = store.load_master()
     result = run["result"] or {}
     fields = run["fields"] or {}

@@ -4,6 +4,8 @@
 const view = document.getElementById("view");
 const STAGE_NAMES = ["Receive", "Read route", "Extract fields", "AI cross-check", "Check document", "Check vendor", "Find PO", "Check duplicates", "Match PO and receipt", "Decide"];
 const STAGE_COUNT = STAGE_NAMES.length;
+// The ten stages, grouped into the steps a clerk would name.
+const PHASES = { 1: ["01", "Receive"], 3: ["02", "Read"], 5: ["03", "Check"], 10: ["04", "Decide"] };
 const AI_STAGES = { 3: "scan", 4: "always" };
 const FIELD_LABELS = {
   vendor: "Vendor", invoice_number: "Invoice number", invoice_date: "Invoice date", po_number: "PO number", currency: "Currency",
@@ -31,12 +33,13 @@ let config = { samples: [], vendors: [], ai_reader: false, code_names: {} };
 let timer = null;
 
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-const dollars = (v) => "$" + Number(v || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
+// Indian digit grouping: 12,46,500.00
+const money = (v) => (v == null || v === "" ? "" : Number(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+const rupees = (v) => "₹" + Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 0 });
 const titled = (s) => String(s || "").replace(/_/g, " ");
 const codeName = (c) => config.code_names[c] || c;
 const pill = (decision, text) => decision ? `<span class="pill ${esc(decision)}">${DECISION_ICON[decision] || ""}${esc(text || WORD[decision] || decision)}</span>` : `<span class="pill">${esc(text || "Waiting")}</span>`;
-const when = (iso) => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+const when = (iso) => { if (!iso) return ""; const d = new Date(iso); return d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", timeZone: "Asia/Kolkata" }); };
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -94,56 +97,51 @@ async function showOverview() {
   view.innerHTML = `<p class="muted">Loading...</p>`;
   let m, runs;
   try { [m, runs] = await Promise.all([api("/api/metrics"), api("/api/runs")]); } catch (e) { view.innerHTML = `<div class="error">${esc(e.message)}</div>`; return; }
+  const latest = runs.runs.filter((r) => !r.superseded && r.status === "done");
+  const waiting = latest.filter((r) => r.final_status === "awaiting clerk");
   const straight = m.invoices ? Math.round((m.auto_approved / m.invoices) * 100) : 0;
-  const waiting = runs.runs.filter((r) => !r.superseded && r.status === "done" && r.final_status === "awaiting clerk");
-  const hours = (m.minutes_saved / 60).toFixed(1);
-  const a = m.assumptions || {};
+  const scans = latest.filter((r) => r.read_source !== "text_layer").length;
+  const step = (n, title, desc, value, sub) => `<div class="step"><span class="n">${n}</span><div><div class="t">${title}</div><div class="d">${desc}</div></div><div class="v">${value}</div><div class="s">${sub}</div></div>`;
   view.innerHTML = `
     <div class="page-head">
-      <div><div class="eyebrow">Accounts payable, Halden Manufacturing</div><h1>Overview</h1>
-        <p>Every invoice is checked against the vendor master, the PO, goods received and earlier invoices before anyone pays it. Rules decide; AI reads and double-checks; a person settles anything unclear.</p></div>
-      <div class="actions"><a class="btn" href="#/inbox">${ICONS.mail}Open inbox</a><a class="btn primary" href="#/new">${ICONS.upload}Check invoices</a></div>
+      <div><div class="eyebrow">Accounts payable · ${esc(config.buyer || "")}</div><h1>Invoices, checked<br>before they are paid</h1>
+        <p>Each invoice goes through five steps. The rules make every decision. Anything they can't settle goes to a person, with the reason and the next step.</p></div>
+      <div class="actions"><a class="btn" href="#/inbox">Open inbox</a><a class="btn primary" href="#/new">Check invoices</a></div>
     </div>
-    <div class="kpis">
-      ${kpi("Invoices checked", m.invoices, m.median_seconds != null ? `Median <strong>${m.median_seconds} s</strong> each` : "")}
-      ${kpi("Approved straight through", m.auto_approved, `<strong>${straight}%</strong> with no one touching it`)}
-      ${kpi("Waiting for a person", m.held, `<strong>${dollars(m.value_held)}</strong> on hold`)}
-      ${kpi("Risky payments stopped", dollars(m.at_risk_stopped), "Duplicates, bank changes, blocked vendors")}
+    <section class="flow" aria-label="The five steps">
+      ${step("01", "Receive", "Email or upload. Sender checked against the vendor's domain.", m.invoices, "invoices in")}
+      ${step("02", "Read", "Fields read from the PDF text. Scans go to AI, then a person.", m.invoices - scans, `from PDF text · ${scans} scan${scans === 1 ? "" : "s"}`)}
+      ${step("03", "Check", "Vendor, bank, PO, duplicates, goods received, GST.", "12", "checks on every invoice")}
+      ${step("04", "Decide", "Approve, hold or reject. Approve only if all 12 passed.", m.approved, `approved · ${m.held} held · ${m.rejected} rejected`)}
+      ${step("05", "Pay", "Payment file for the ERP, to the bank account on file.", m.approved, `<a href="/api/export/approved.csv">Download CSV</a>`)}
+    </section>
+    <div class="stats">
+      ${stat("Checked", m.invoices, m.median_seconds != null ? `median ${m.median_seconds} s each` : "")}
+      ${stat("Approved with no one touching it", `${straight}%`, `${m.auto_approved} of ${m.invoices}`)}
+      ${stat("Waiting for a person", m.held, `${rupees(m.value_held)} on hold`)}
+      ${stat("Approved for payment", rupees(m.value_approved), `${m.approved} invoice${m.approved === 1 ? "" : "s"}`)}
     </div>
-    <div class="grid-3" style="margin-bottom:20px">
+    <div class="grid-3">
       <section class="card">
-        <div class="card-head"><div><h2>Needs attention</h2><p>Held invoices, with who acts next and what to ask for.</p></div><a class="btn small" href="#/runs?filter=HOLD">All holds</a></div>
-        ${waiting.length ? `<ul class="attention">${waiting.slice(0, 6).map((r) => `
+        <div class="card-head"><div><h2>Needs a person</h2><p>Held invoices, oldest first, with what to do next.</p></div><a class="btn small" href="#/runs?filter=HOLD">All holds</a></div>
+        ${waiting.length ? `<ul class="queue">${waiting.slice().reverse().slice(0, 8).map((r) => `
           <li tabindex="0" data-run="${esc(r.id)}">
-            <div class="what">${esc(r.vendor || r.file_name)} <span class="muted small">${esc(r.invoice_number || "")}</span></div>
-            <div class="num small" style="text-align:right">${r.gross ? "$" + money(r.gross) : ""}</div>
-            <div class="why"><span class="code">${esc(r.codes[0] || "")}</span> ${esc(r.summary || "")}</div>
+            <div class="what">${esc(r.vendor || r.file_name)} <span class="muted small mono">${esc(r.invoice_number || "")}</span></div>
+            <div class="amt">${r.gross ? "₹" + money(r.gross) : ""}</div>
+            <div class="why"><span class="code">${esc(r.codes[0] || "")}</span><span>${esc(codeName(r.codes[0] || ""))}: ${esc(r.summary || "")}</span></div>
             <div class="who">Next: ${esc(r.next_step.owner || "AP clerk")}. ${esc(r.next_step.action || "")}</div>
-          </li>`).join("")}</ul>` : `<div class="empty">Nothing is waiting. Every invoice checked so far was decided by the rules.</div>`}
+          </li>`).join("")}</ul>` : `<div class="empty">Nothing is waiting. Every invoice so far was settled by the rules.</div>`}
       </section>
-      <section class="card card-pad impact">
-        <h2>Time given back</h2>
-        <div class="big num">${hours} h</div>
-        <p class="small muted" style="margin:0">Estimated from ${m.invoices} invoices: ${esc(a.manual_minutes_per_invoice)} min each by hand, ${esc(a.review_minutes_per_exception)} min to settle a hold. ${esc(a.note || "")}</p>
-        <div class="sect"><div class="label">Payment file</div>
-          <p class="small" style="margin-bottom:10px">${m.approved} approved invoice${m.approved === 1 ? "" : "s"}, ${dollars(m.value_approved)}, paid only to the bank account on file.</p>
-          <a class="btn" href="/api/export/approved.csv">${ICONS.download}Export for the ERP (CSV)</a></div>
-      </section>
-    </div>
-    <div class="grid-2">
-      <section class="card"><div class="card-head"><div><h2>Outcomes</h2><p>Latest decision on each invoice.</p></div></div><div class="card-body">${mixChart(m)}</div></section>
-      <section class="card"><div class="card-head"><div><h2>Why invoices stop</h2><p>The first reason on each hold or reject.</p></div></div><div class="card-body">${barChart(m.reasons.map((r) => ({ name: r.name, value: r.count, label: String(r.count), tip: `${r.name} (${r.code}): ${r.count}` })), "No holds or rejects yet.")}</div></section>
-      <section class="card"><div class="card-head"><div><h2>Approved value by vendor</h2><p>Gross, approved by the rules or by a person.</p></div></div><div class="card-body">${barChart(m.value_by_vendor.map((v) => ({ name: v.vendor, value: v.value, label: dollars(v.value), tip: `${v.vendor}: $${money(v.value)}` })), "Nothing approved yet.")}</div></section>
-      <section class="card"><div class="card-head"><div><h2>Recent activity</h2><p>Your runs and the shared history.</p></div><a class="btn small" href="#/runs">All runs</a></div>
-        <div class="table-wrap"><table><tbody>${runs.runs.filter((r) => !r.superseded).slice(0, 6).map((r) => `
-          <tr tabindex="0" data-run="${esc(r.id)}"><td>${esc(r.vendor || r.file_name)}<div class="muted small">${esc(r.invoice_number || "")} ${r.history ? "· history" : ""}</div></td>
-          <td>${pill(r.decision, r.status !== "done" ? "Checking" : null)}</td><td class="num">${r.gross ? "$" + money(r.gross) : ""}</td></tr>`).join("")}</tbody></table></div></section>
+      <div class="stack">
+        <section class="card"><div class="card-head"><div><h2>Outcomes</h2><p>Latest decision on each invoice.</p></div></div><div class="card-body">${mixChart(m)}</div></section>
+        <section class="card"><div class="card-head"><div><h2>Why invoices stop</h2><p>First reason on each hold or reject.</p></div></div><div class="card-body">${barChart(m.reasons.map((r) => ({ name: r.name, value: r.count, label: String(r.count), tip: `${r.code}: ${r.count}` })), "No holds or rejects yet.")}</div></section>
+      </div>
     </div>`;
   bindRows();
 }
 
-function kpi(label, value, sub) {
-  return `<section class="card kpi"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="sub">${sub}</div></section>`;
+function stat(label, value, sub) {
+  return `<div class="stat"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div><div class="sub">${esc(sub)}</div></div>`;
 }
 
 function mixChart(m) {
@@ -180,17 +178,17 @@ async function showInbox() {
   const fresh = data.messages.filter((m) => !m.batch_id);
   view.innerHTML = `
     <div class="page-head">
-      <div><div class="eyebrow">ap@halden-mfg.example</div><h1>Inbox</h1>
-        <p>Invoices arrive here by email. Each PDF attachment is checked in the order it arrived, and the sender's address is compared with the vendor's domain on file.</p></div>
-      <div class="actions"><button class="btn primary" id="process-all" ${fresh.length ? "" : "disabled"}>${ICONS.spark}Check ${fresh.length ? `all ${fresh.length} new` : "all"} emails</button></div>
+      <div><div class="eyebrow">ap@vardhan-auto.example</div><h1>Inbox</h1>
+        <p>Vendors email their invoices here. Each PDF is checked in the order it arrived, and the sender's domain is compared with the one on file.</p></div>
+      <div class="actions"><button class="btn primary" id="process-all" ${fresh.length ? "" : "disabled"}>Check ${fresh.length ? `all ${fresh.length} new` : "all"} emails</button></div>
     </div>
     <div id="inbox-error"></div>
     <section class="card mailbox">
       <div class="mails" role="listbox" aria-label="Emails">${data.messages.map((m, i) => `
         <button class="mail ${i === 0 ? "sel" : ""}" data-mail="${esc(m.id)}" role="option">
-          <div class="top"><span class="from">${esc(m.from_name || m.from)}</span><span class="when">${esc(when(m.date))}</span></div>
+          <div class="top-line"><span class="from">${esc(m.from_name || m.from)}</span><span class="when">${esc(when(m.date))}</span></div>
           <div class="subj">${esc(m.subject)}</div>
-          <div class="meta">${m.attachments.map((a) => `<span class="tag">${ICONS.clip} ${esc(a)}</span>`).join("")}${m.batch_id ? `<span class="pill APPROVE" style="background:var(--accent-soft);color:var(--accent-strong)">Checked</span>` : ""}</div>
+          <div class="meta">${m.attachments.map((a) => `<span class="tag">${ICONS.clip} ${esc(a)}</span>`).join("")}${m.batch_id ? `<span class="pill">Checked</span>` : ""}</div>
         </button>`).join("")}</div>
       <div class="reader" id="reader"></div>
     </section>`;
@@ -224,7 +222,7 @@ async function processInbox(ids) {
 function showNew() {
   view.innerHTML = `
     <div class="page-head"><div><h1>Check invoices</h1>
-      <p>Drop one invoice to watch every check run, or several to check them as a batch. Each is compared with the approved vendors, the POs, goods received and earlier invoices.</p></div></div>
+      <p>Drop one PDF to watch each step run, or several to check them as a batch.</p></div></div>
     <div class="stack">
       <section class="card card-pad">
         <label class="drop" id="drop">
@@ -236,11 +234,11 @@ function showNew() {
         <div id="new-error"></div>
       </section>
       <section class="card">
-        <div class="card-head"><div><h2>Sample invoices</h2><p>Each one shows a different check at work. All made up.</p></div><a class="btn small" href="#/inbox">${ICONS.mail}Or check them from the inbox</a></div>
-        <div class="card-body"><div class="samples">${config.samples.map((s) => {
+        <div class="card-head"><div><h2>Sample invoices</h2><p>Each one shows a different check at work. All made up.</p></div><a class="btn small" href="#/inbox">Or use the inbox</a></div>
+        <div class="samples">${config.samples.map((s) => {
           const [who, what] = s.label.split(": ");
           return `<button class="sample" data-sample="${esc(s.file)}"><span class="k">${esc(s.file.split("-")[0])}</span><span class="t">${esc(what || s.label)}</span><span class="d">${esc(who)}</span></button>`;
-        }).join("")}</div></div>
+        }).join("")}</div>
       </section>
     </div>`;
   const fail = (e) => { document.getElementById("new-error").innerHTML = `<div class="error">${esc(e.message)}</div>`; };
@@ -284,9 +282,9 @@ async function showBatch(batchId) {
     const fromEmail = rows.some((r) => r.source === "email");
     if (!document.getElementById("batch-body")) {
       view.innerHTML = `
-        <div class="page-head"><div><div class="eyebrow">Batch ${esc(batchId)}</div><h1>${fromEmail ? "Inbox batch" : "Upload batch"}: ${rows.length} invoice${rows.length === 1 ? "" : "s"}</h1>
+        <div class="page-head"><div><div class="eyebrow">Batch ${esc(batchId)}</div><h1>${rows.length} invoice${rows.length === 1 ? "" : "s"} from ${fromEmail ? "the inbox" : "upload"}</h1>
           <p>Checked one after another in the order they arrived, so each one sees the decisions made before it.</p></div>
-          <div class="actions"><a class="btn" href="#/overview">Overview</a><a class="btn" href="#/runs">All runs</a></div></div>
+          <div class="actions"><a class="btn" href="#/overview">Overview</a><a class="btn" href="#/runs">All invoices</a></div></div>
         <div id="batch-body"></div>`;
     }
     document.getElementById("batch-body").innerHTML = `
@@ -302,7 +300,7 @@ async function showBatch(batchId) {
           <td class="small">${esc(fromEmail ? r.sender : r.file_name)}</td>
           <td>${r.status === "done" ? pill(r.decision) : r.status === "failed" ? pill("REJECT", "Failed") : r.status === "queued" ? `<span class="muted small">Queued${r.queue_position ? `, ${r.queue_position} in line` : ""}</span>` : `<span class="small">Stage ${r.stage ? r.stage.number : 1} of ${STAGE_COUNT}: ${esc(r.stage ? r.stage.name : "Receive")}</span>`}</td>
           <td class="small">${r.status === "done" ? `<div class="chips">${r.codes.map((c) => `<span class="code" title="${esc(codeName(c))}">${esc(c)}</span>`).join("")}</div>${r.codes.length ? `<div class="muted" style="margin-top:2px">${esc(codeName(r.codes[0]))}</div>` : ""}` : ""}</td>
-          <td class="num">${r.gross ? "$" + money(r.gross) : ""}</td></tr>`).join("")}</tbody></table></div></section>`;
+          <td class="num">${r.gross ? "₹" + money(r.gross) : ""}</td></tr>`).join("")}</tbody></table></div></section>`;
     bindRows();
     if (done.length < rows.length) timer = setTimeout(tick, 700);
   };
@@ -317,8 +315,8 @@ async function showRuns() {
   const initial = (location.hash.split("filter=")[1] || "").toUpperCase();
   const c = data.counts;
   view.innerHTML = `
-    <div class="page-head"><div><h1>All runs</h1><p>Every check, with its decision and output. Your runs plus the shared history. Corrected runs stay on record beside the run that replaced them.</p></div>
-      <div class="actions"><a class="btn" href="/api/export/approved.csv">${ICONS.download}Export approved (CSV)</a><button class="btn" id="reset">Reset demo data</button></div></div>
+    <div class="page-head"><div><h1>All invoices</h1><p>Every check, with its decision. Your runs plus the shared history. A corrected run stays on record beside the one that replaced it.</p></div>
+      <div class="actions"><a class="btn" href="/api/export/approved.csv">${ICONS.download}Payment file (CSV)</a><button class="btn" id="reset">Reset demo data</button></div></div>
     <section class="card">
       <div class="toolbar">
         <div class="seg" role="group" aria-label="Filter by decision">
@@ -398,22 +396,24 @@ async function showRun(runId, live) {
       view.innerHTML = `
         <div class="page-head">
           <div><div class="eyebrow">${esc(SOURCE[run.source] || "Upload")} · Run ${esc(run.id)}${run.parent_run_id ? `, corrected re-run of ${esc(run.parent_run_id)}` : ""}${data.is_history ? " · shared history" : ""}</div>
-            <h1 id="run-title">${esc(run.file_name)}</h1><div class="facts" id="facts"></div></div>
+            <h1 id="run-title" class="run-title">${esc(run.file_name)}</h1><div class="facts" id="facts"></div></div>
           <div class="actions">${run.batch_id ? `<a class="btn" href="#/batch/${esc(run.batch_id)}">Back to batch</a>` : ""}<a class="btn" href="#/new">Check another</a></div>
         </div>
         <div class="run-grid" id="run-root">
           <div class="doc-col"><div id="page"></div></div>
           <div class="stack"><div id="decision"></div><div id="draft"></div>
-            <section class="card card-pad"><div class="timeline-head"><h2>What happened</h2><span class="muted small" id="stage-count"></span></div>
+            <section class="card card-pad"><div class="timeline-head"><h2>Step by step</h2><span class="muted small" id="stage-count"></span></div>
               <div class="progress" style="margin:10px 0 6px"><span id="stage-bar"></span></div><ol class="stages" id="stages"></ol></section>
             <div id="clerk"></div></div>
         </div>`;
       renderPage(data, pageNumber);
     }
     document.getElementById("facts").innerHTML = factsHtml(data);
+    const number = ((run.fields || {}).invoice_number || {}).value;
+    document.getElementById("run-title").textContent = number ? `Invoice ${number}` : run.file_name;
     document.getElementById("stage-count").textContent = `${Math.min(count, STAGE_COUNT)} of ${STAGE_COUNT} stages`;
     document.getElementById("stage-bar").style.width = `${(Math.min(count, STAGE_COUNT) / STAGE_COUNT) * 100}%`;
-    document.getElementById("stages").innerHTML = STAGE_NAMES.map((name, i) => stageHtml(name, i + 1, stages[i + 1], count, run, fresh)).join("");
+    document.getElementById("stages").innerHTML = STAGE_NAMES.map((name, i) => (PHASES[i + 1] ? `<li class="phase" aria-hidden="true"><span class="pn">${PHASES[i + 1][0]}</span>${PHASES[i + 1][1]}</li>` : "") + stageHtml(name, i + 1, stages[i + 1], count, run, fresh)).join("");
     if (finished) {
       document.getElementById("decision").innerHTML = decisionHtml(data);
       if (!document.getElementById("clerk").dataset.done) {
@@ -463,7 +463,7 @@ function factsHtml(data) {
   if (vendor) parts.push(`<span><strong>${esc(vendor.name)}</strong></span>`);
   if (v("invoice_number")) parts.push(`<span>Invoice <strong>${esc(v("invoice_number"))}</strong></span>`);
   if (v("po_number")) parts.push(`<span>PO <strong>${esc(v("po_number"))}</strong></span>`);
-  if (total) parts.push(`<span>Total <strong>$${money(total)}</strong></span>`);
+  if (total) parts.push(`<span>Total <strong>₹${money(total)}</strong></span>`);
   if (run.sender) parts.push(`<span>From <strong>${esc(run.sender)}</strong></span>`);
   return parts.join("");
 }
@@ -502,7 +502,7 @@ function stageDetail(stage) {
     const rows = d.checks.map((c) => `<tr><td>${esc(c.label)}</td><td><span class="st ${esc(c.status)}">${esc(titled(c.status))}</span></td><td>${esc(c.sentence)}</td></tr>`).join("");
     const sums = table ? `<table class="mini"><tbody>
         <tr><td>PO net</td><td class="num">${money(table.table.po_net)}</td></tr>
-        <tr><td>Tolerance (lesser of 2% and 250.00)</td><td class="num">${money(table.table.tolerance)}</td></tr>
+        <tr><td>Tolerance (${esc(config.tolerance ? `${config.tolerance.pct}%, at most ₹${money(config.tolerance.cap)}` : "")})</td><td class="num">${money(table.table.tolerance)}</td></tr>
         <tr><td><strong>Limit</strong></td><td class="num"><strong>${money(table.table.limit)}</strong></td></tr>
         <tr><td>Approved so far on this PO</td><td class="num">${money(table.table.approved_to_date)}</td></tr>
         <tr><td>This invoice, net</td><td class="num">${money(table.table.this_invoice_net)}</td></tr>
@@ -641,7 +641,7 @@ function fieldHtml(name, field, isScan) {
   } else if (field.state === "CONFLICT" && (field.readings || []).length) {
     control = `<select ${attrs}><option value="">Choose one...</option>${field.readings.map((r) => `<option value="${esc(r)}">${esc(r)}</option>`).join("")}</select>`;
   } else {
-    const hint = name === "invoice_date" ? "YYYY-MM-DD" : name === "currency" ? "USD" : name === "bank_last4" ? "Last 4 digits" : "";
+    const hint = name === "invoice_date" ? "YYYY-MM-DD" : name === "currency" ? "INR" : name === "bank_last4" ? "Last 4 digits" : "";
     control = `<input type="text" ${attrs} value="${esc(value)}" placeholder="${hint}" autocomplete="off">`;
   }
   const stateText = { FOUND: "read from the page", MISSING: "not found", CONFLICT: "unclear", PROPOSED: "AI read", ENTERED: "entered", OVERRIDDEN: "overridden" }[field.state] || "";
@@ -677,7 +677,7 @@ function finalHtml(data) {
 (async () => {
   try { config = await api("/api/config"); } catch (e) { view.innerHTML = `<div class="error">${esc(e.message)}</div>`; return; }
   const badge = document.getElementById("ai-badge");
-  badge.querySelector(".t").textContent = config.ai_reader ? "AI reading and cross-check on" : "AI off: rules only";
+  badge.querySelector(".t").textContent = config.ai_reader ? "AI on" : "AI off";
   badge.classList.toggle("on", config.ai_reader);
   badge.title = config.ai_reader ? "Claude reads scans for a person to confirm, and double-checks every text PDF." : "Scans need a person to type the values; text PDFs are read by the rules alone.";
   route();

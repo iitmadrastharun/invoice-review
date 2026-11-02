@@ -18,17 +18,17 @@ def f(value, state="FOUND", **extra):
 
 
 def clean(**over):
-    """A clean Northwind invoice on PO-4501."""
+    """A clean Kaveri invoice on PO-4501."""
     fields = {
         "vendor": f("V-1001"), "invoice_number": f("INV-1"), "invoice_date": f("2026-10-26"), "po_number": f("PO-4501"),
-        "subtotal": f("10000.00"), "tax": f("800.00"), "total": f("10800.00"), "currency": f("USD"), "bank_last4": f("4471"),
+        "subtotal": f("1000000.00"), "tax": f("180000.00"), "total": f("1180000.00"), "currency": f("INR"), "bank_last4": f("4471"),
         "document_type": f("invoice"), "tax_included_rate": f(None, "MISSING"),
     }
     fields.update(over)
     return fields
 
 
-def row(vendor="V-1001", number="1", date_="2026-10-26", po="PO-4501", net="10000.00", gross="10800.00", status="APPROVED", printed="INV-1"):
+def row(vendor="V-1001", number="1", date_="2026-10-26", po="PO-4501", net="1000000.00", gross="1180000.00", status="APPROVED", printed="INV-1"):
     return {"case_id": "c-x", "workspace": "w", "last_run_id": "r-9", "vendor_id": vendor, "invoice_number": printed, "number_norm": number,
             "invoice_date": date_, "po_number": po, "net": net, "gross": gross, "status": status}
 
@@ -54,11 +54,11 @@ MISSING = f(None, "MISSING")
     (clean(po_number=f("PO-4200")), [], "text_layer", "HOLD", "H-PO-INVALID"),  # cancelled, but another vendor's
     (clean(), [row()], "text_layer", "REJECT", "RJ-DUP"),
     (clean(), [row(date_="2025-10-26")], "text_layer", "HOLD", "H-DUP-NUMBER"),  # same number, a year apart
-    (clean(), [row(gross="10000.00")], "text_layer", "HOLD", "H-DUP-NUMBER"),
+    (clean(), [row(gross="1000000.00")], "text_layer", "HOLD", "H-DUP-NUMBER"),
     (clean(), [row(status="HELD")], "text_layer", "HOLD", "H-DUP-NUMBER"),
-    (clean(), [row(number="99999", net="500.00", gross="10800.50", po="PO-4502")], "text_layer", "HOLD", "H-DUP-NEAR"),  # close in time
-    (clean(), [row(number="99999", date_="2026-05-01", net="500.00")], "text_layer", "HOLD", "H-DUP-NEAR"),  # same PO, any date
-    (clean(invoice_number=f("AP7781R1")), [row(number="AP7781", date_="2026-05-01", po="PO-4502", net="500.00")], "text_layer", "HOLD", "H-DUP-NEAR"),  # related number
+    (clean(), [row(number="99999", net="50000.00", gross="1180000.50", po="PO-4502")], "text_layer", "HOLD", "H-DUP-NEAR"),  # close in time
+    (clean(), [row(number="99999", date_="2026-05-01", net="50000.00")], "text_layer", "HOLD", "H-DUP-NEAR"),  # same PO, any date
+    (clean(invoice_number=f("AP7781R1")), [row(number="AP7781", date_="2026-05-01", po="PO-4502", net="50000.00")], "text_layer", "HOLD", "H-DUP-NEAR"),  # related number
     (clean(invoice_number=MISSING), [], "text_layer", "HOLD", "H-FIELD"),
     (clean(invoice_date=f(None, "CONFLICT", readings=["2026-11-03", "2026-03-11"])), [], "text_layer", "HOLD", "H-FIELD"),
     (clean(total=f(None, "CONFLICT", readings=["12.400,00"])), [], "text_layer", "HOLD", "H-FIELD"),
@@ -67,16 +67,16 @@ MISSING = f(None, "MISSING")
     (clean(currency=MISSING), [], "text_layer", "HOLD", "H-CHECK-NOT-RUN"),
     (clean(document_type=f("credit_note")), [], "text_layer", "HOLD", "H-DOC"),
     (clean(document_type=MISSING), [], "text_layer", "HOLD", "H-DOC"),
-    (clean(subtotal=f("-10000.00"), tax=f("-800.00"), total=f("-10800.00")), [], "text_layer", "HOLD", "H-DOC"),
+    (clean(subtotal=f("-1000000.00"), tax=f("-180000.00"), total=f("-1180000.00")), [], "text_layer", "HOLD", "H-DOC"),
     (clean(invoice_date=f("2026-11-20")), [], "text_layer", "HOLD", "H-DATE"),
     (clean(invoice_date=f("2026-09-01")), [], "text_layer", "HOLD", "H-DATE"),  # before the PO
-    (clean(total=f("10900.00")), [], "text_layer", "HOLD", "H-ARITH"),
+    (clean(total=f("1190000.00")), [], "text_layer", "HOLD", "H-ARITH"),
     (clean(subtotal=MISSING, tax=MISSING), [], "text_layer", "HOLD", "H-TAX"),  # total only
-    (clean(tax=f("1000.00"), total=f("11000.00")), [], "text_layer", "HOLD", "H-TAX"),  # wrong rate
-    (clean(subtotal=f("12700.00"), tax=f("1016.00"), total=f("13716.00")), [], "text_layer", "HOLD", "H-AMOUNT"),
-    (clean(), [row(number="5", net="2000.00", gross="2160.00")], "text_layer", "APPROVE", None),
-    (clean(), [row(number="5", net="3000.00", gross="3240.00", status="HELD")], "text_layer", "APPROVE", None),  # held does not count
-    (clean(), [row(number="5", net="2000.00", gross="2160.00"), row(number="6", net="700.00", gross="756.00")], "text_layer", "HOLD", "H-AMOUNT"),
+    (clean(tax=f("200000.00"), total=f("1200000.00")), [], "text_layer", "HOLD", "H-TAX"),  # wrong rate
+    (clean(subtotal=f("1270000.00"), tax=f("228600.00"), total=f("1498600.00")), [], "text_layer", "HOLD", "H-AMOUNT"),
+    (clean(), [row(number="5", net="200000.00", gross="236000.00")], "text_layer", "APPROVE", None),
+    (clean(), [row(number="5", net="300000.00", gross="354000.00", status="HELD")], "text_layer", "APPROVE", None),  # held does not count
+    (clean(), [row(number="5", net="200000.00", gross="236000.00"), row(number="6", net="70000.00", gross="82600.00")], "text_layer", "HOLD", "H-AMOUNT"),
     (clean(vendor=MISSING), [], "text_layer", "HOLD", "H-VENDOR"),
     (clean(vendor=f("V-1008")), [], "text_layer", "HOLD", "H-VENDOR"),
     (clean(vendor=f(None, "CONFLICT", readings=["V-1001", "V-1002"])), [], "text_layer", "HOLD", "H-VENDOR"),
@@ -86,11 +86,11 @@ MISSING = f(None, "MISSING")
     (clean(po_number=f("PO-4620")), [], "text_layer", "HOLD", "H-PO-INVALID"),  # another vendor's
     (clean(po_number=f("PO-4100")), [], "text_layer", "HOLD", "H-PO-INVALID"),  # closed
     (clean(po_number=MISSING), [], "text_layer", "HOLD", "H-PO-NONE"),
-    # goods receipts: PO-4501 has 12,400.00 received
-    (clean(subtotal=f("12600.00"), tax=f("1008.00"), total=f("13608.00")), [], "text_layer", "APPROVE", None),  # inside the tolerance on both
-    (clean(), [row(number="5", net="3000.00", gross="3240.00")], "text_layer", "HOLD", "H-RECEIPT"),  # 13,000 billed, 12,400 received
-    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("4800.00"), tax=f("384.00"), total=f("5184.00")), [], "text_layer", "HOLD", "H-RECEIPT"),
-    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("3200.00"), tax=f("256.00"), total=f("3456.00")), [], "text_layer", "APPROVE", None),
+    # goods receipts: PO-4501 has 12,40,000.00 received
+    (clean(subtotal=f("1260000.00"), tax=f("226800.00"), total=f("1486800.00")), [], "text_layer", "APPROVE", None),  # inside the tolerance on both
+    (clean(), [row(number="5", net="300000.00", gross="354000.00")], "text_layer", "HOLD", "H-RECEIPT"),  # 13,00,000 billed, 12,40,000 received
+    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("480000.00"), tax=f("86400.00"), total=f("566400.00")), [], "text_layer", "HOLD", "H-RECEIPT"),
+    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("320000.00"), tax=f("57600.00"), total=f("377600.00")), [], "text_layer", "APPROVE", None),
 ])
 def test_decision_table(fields, ledger, read_source, decision, code):
     out = decide(fields, ledger, read_source)
@@ -113,10 +113,10 @@ def test_po_with_no_receipt_holds():
 
 
 def test_receipt_shortfall_names_what_can_be_paid_now():
-    fields = clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("4800.00"), tax=f("384.00"), total=f("5184.00"))
+    fields = clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("480000.00"), tax=f("86400.00"), total=f("566400.00"))
     out = decide(fields)
-    assert "3,200.00" in out["summary"] and "1,600.00 more than has arrived" in out["summary"]
-    assert "bill 3,200.00 now" in out["next_step"]["action"]
+    assert "₹3,20,000.00" in out["summary"] and "₹1,60,000.00 more than has arrived" in out["summary"]
+    assert "bill ₹3,20,000.00 now" in out["next_step"]["action"]
 
 
 def test_no_receipt_data_is_a_check_not_run():
@@ -125,29 +125,29 @@ def test_no_receipt_data_is_a_check_not_run():
 
 
 @pytest.mark.parametrize("sender,decision", [
-    ("billing@northwind-industrial.example", "APPROVE"),
-    ("ap@mail.northwind-industrial.example", "APPROVE"),  # a subdomain of the one on file
-    ("accounts@northwind-industrial-billing.example", "HOLD"),  # look-alike
-    ("northwind.billing@gmail.example", "HOLD"),
+    ("billing@kaveri-industrial.example", "APPROVE"),
+    ("ap@mail.kaveri-industrial.example", "APPROVE"),  # a subdomain of the one on file
+    ("accounts@kaveri-industrial-billing.example", "HOLD"),  # look-alike
+    ("kaveri.billing@gmail.example", "HOLD"),
 ])
 def test_sender_domain(sender, decision):
     out = decide(sender=sender)
     assert out["decision"] == decision
     if decision == "HOLD":
-        assert out["codes"] == ["H-SENDER"] and "+1 555 0142" in out["next_step"]["action"]
+        assert out["codes"] == ["H-SENDER"] and "+91 44 4012 0142" in out["next_step"]["action"]
     assert out["checks"]["ran"] == 12  # the sender check is extra, not one of the twelve
 
 
 def test_sender_and_bank_change_together_lead_with_sender():
-    out = decide(clean(bank_last4=f("9931")), sender="accounts@northwind-industrial-billing.example")
+    out = decide(clean(bank_last4=f("9931")), sender="accounts@kaveri-industrial-billing.example")
     assert out["codes"][:2] == ["H-SENDER", "H-VENDOR-BANK"]
 
 
 def test_ai_disagreement_holds_and_agreement_does_not():
     ev = Evaluation(clean(), VENDORS, POS, [], POLICY, TODAY, "text_layer", RECEIPTS)
-    ev.apply_cross_check([{"field": "total", "rules": "10800.00", "ai": "10080.00"}])
+    ev.apply_cross_check([{"field": "total", "rules": "1180000.00", "ai": "1108000.00"}])
     out = ev.run_all()
-    assert out["decision"] == "HOLD" and out["codes"] == ["H-READ-DISAGREE"] and "10080.00" in out["summary"]
+    assert out["decision"] == "HOLD" and out["codes"] == ["H-READ-DISAGREE"] and "1108000.00" in out["summary"]
     ev = Evaluation(clean(), VENDORS, POS, [], POLICY, TODAY, "text_layer", RECEIPTS)
     ev.apply_cross_check([])
     assert ev.run_all()["decision"] == "APPROVE"
@@ -170,20 +170,21 @@ def test_reject_is_listed_with_holds():
 
 
 def test_tolerance_uses_lesser_of_pct_and_cap():
-    assert decide()["numbers"]["tolerance"] == "248.00"  # 2% of 12,400 is under the 250 cap
+    assert decide()["numbers"]["tolerance"] == "24800.00"  # 2% of 12,40,000 is under the 25,000 cap
     big = clean(vendor=f("V-1002"), po_number=f("PO-4620"), bank_last4=f("2093"))
-    assert decide(big)["numbers"]["tolerance"] == "250.00"  # 2% of 40,000 is over the cap
+    assert decide(big)["numbers"]["tolerance"] == "25000.00"  # 2% of 40,00,000 is over the cap
 
 
 def test_tolerance_applies_once_per_po_not_per_invoice():
-    earlier = [row(vendor="V-1002", number="7", po="PO-4620", net="39000.00", gross="42120.00", date_="2026-09-01")]
-    fields = clean(vendor=f("V-1002"), po_number=f("PO-4620"), bank_last4=f("2093"), subtotal=f("1300.00"), tax=f("104.00"), total=f("1404.00"))
-    assert decide(fields, earlier)["codes"] == ["H-AMOUNT"]  # 40,300 is over 40,250, though 1,300 alone is nothing
+    earlier = [row(vendor="V-1002", number="7", po="PO-4620", net="3900000.00", gross="4602000.00", date_="2026-09-01")]
+    fields = clean(vendor=f("V-1002"), po_number=f("PO-4620"), bank_last4=f("2093"), subtotal=f("130000.00"), tax=f("23400.00"), total=f("153400.00"))
+    assert decide(fields, earlier)["codes"] == ["H-AMOUNT"]  # 40,30,000 is over 40,25,000, though 1,30,000 alone is nothing
 
 
 def test_normalising_invoice_numbers():
     assert normalise_number("INV-00417") == normalise_number("417") == normalise_number("inv 417")
-    assert normalise_number("AP7781-R1") != normalise_number("AP-7781")
+    assert normalise_number("API/26-27/7781-R") != normalise_number("API/26-27/7781")
+    assert normalise_number("KIS/26-27/0417") == normalise_number("kis 26-27 0417")
 
 
 # --- field reading on small generated pages
@@ -198,7 +199,7 @@ def page(tmp_path, lines, name="t.pdf"):
     return path
 
 
-HEADER = [(48, 50, "Northwind Industrial Supply LLC"), (48, 64, "Tax ID: 84-2291047"), (400, 50, "INVOICE")]
+HEADER = [(48, 50, "Kaveri Industrial Supplies Pvt Ltd"), (48, 64, "GSTIN: 33AABCK4471M1Z2"), (400, 50, "INVOICE")]
 
 
 def read(tmp_path, lines, vendor_format=None):
@@ -230,6 +231,7 @@ def test_conflicted_date_offers_both_readings(tmp_path):
 
 @pytest.mark.parametrize("printed,state,value", [
     ("12,400.00", "FOUND", "12400.00"), ("12400", "FOUND", "12400.00"), ("$13,462.20", "FOUND", "13462.20"),
+    ("12,46,500.00", "FOUND", "1246500.00"), ("Rs. 14,70,870.00", "FOUND", "1470870.00"), ("INR 1,00,000", "FOUND", "100000.00"),
     ("12.400,00", "CONFLICT", None), ("1,23", "CONFLICT", None), ("(500.00)", "FOUND", "-500.00"),
 ])
 def test_amount_formats(tmp_path, printed, state, value):
@@ -266,24 +268,24 @@ def test_no_currency_mark_is_missing(tmp_path):
 
 
 def test_ship_to_vendor_is_not_the_issuer(tmp_path):
-    path = page(tmp_path, [(48, 50, "Unknown Newco Ltd"), (320, 120, "Ship to"), (320, 134, "Northwind Industrial Supply LLC")])
+    path = page(tmp_path, [(48, 50, "Unknown Newco Ltd"), (320, 120, "Ship to"), (320, 134, "Kaveri Industrial Supplies Pvt Ltd")])
     assert extract.extract(path, VENDORS, POLICY)["vendor"]["state"] == "MISSING"
 
 
 def test_tax_id_and_name_disagreeing_is_a_conflict(tmp_path):
-    path = page(tmp_path, [(48, 50, "Northwind Industrial Supply LLC"), (48, 64, "Tax ID: 47-1185520")])
+    path = page(tmp_path, [(48, 50, "Kaveri Industrial Supplies Pvt Ltd"), (48, 64, "GSTIN: 33AACCM2093F1Z6")])
     assert extract.extract(path, VENDORS, POLICY)["vendor"]["state"] == "CONFLICT"
 
 
 def test_credit_note_title(tmp_path):
-    path = page(tmp_path, [(48, 50, "Northwind Industrial Supply LLC"), (400, 50, "CREDIT NOTE")])
+    path = page(tmp_path, [(48, 50, "Kaveri Industrial Supplies Pvt Ltd"), (400, 50, "CREDIT NOTE")])
     assert extract.extract(path, VENDORS, POLICY)["document_type"]["value"] == "credit_note"
 
 
 def test_unfamiliar_layout_holds_instead_of_guessing(tmp_path):
     """Labels this reader has never seen must end in a hold, never an approval or a guessed value."""
     path = page(tmp_path, [
-        (48, 50, "Northwind Industrial Supply LLC"), (400, 50, "INVOICE"),
+        (48, 50, "Kaveri Industrial Supplies Pvt Ltd"), (400, 50, "INVOICE"),
         (48, 120, "Bill Ref 55123"), (48, 134, "Raised on 2026-10-26"), (48, 148, "Your Order 4501"),
         (300, 300, "Amount Payable"), (450, 300, "USD 10,800.00"),
     ])
