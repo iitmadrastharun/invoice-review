@@ -6,6 +6,8 @@ Takes a vendor invoice PDF and gives an AP clerk an approve, hold or reject deci
 
 All vendors, POs and invoices are made up. No payment is ever made.
 
+**Live version:** https://invoice-review-mpwa.onrender.com. It runs on Render's free tier, so the first visit after a quiet spell can take about a minute to wake up. Scans there skip the AI reading and go straight to the form for a person to fill in.
+
 ## Start it (Windows)
 
 Needs Python 3.11 or later. Run these from this folder:
