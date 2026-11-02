@@ -8,5 +8,10 @@
   "dup_number_min_chars": 4,
   "max_invoice_age_days": 180,
   "buyer_name": "Halden Manufacturing Inc",
-  "buyer_tax_id": "91-3304418"
+  "buyer_tax_id": "91-3304418",
+  "assumptions": {
+    "manual_minutes_per_invoice": 12,
+    "review_minutes_per_exception": 5,
+    "note": "Demo assumptions, not measurements. Replace them with your own team's timings."
+  }
 }

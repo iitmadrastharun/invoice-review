@@ -14,18 +14,29 @@ from decimal import ROUND_HALF_UP, Decimal
 USABLE = {"FOUND", "ENTERED", "OVERRIDDEN", "PROPOSED"}
 
 CHECKS = ["document_type", "required_fields", "arithmetic", "net_and_tax", "date", "vendor_status",
-          "bank_details", "currency", "po", "duplicates", "amount_tolerance"]
+          "bank_details", "currency", "po", "duplicates", "amount_tolerance", "goods_receipt"]
 CHECK_LABELS = {
     "document_type": "Document type", "required_fields": "Required fields", "arithmetic": "Arithmetic",
     "net_and_tax": "Net and tax", "date": "Date", "vendor_status": "Vendor status", "bank_details": "Bank details",
     "currency": "Currency", "po": "PO", "duplicates": "Duplicates", "amount_tolerance": "Amount tolerance",
+    "goods_receipt": "Goods receipt", "sender": "Sender",
 }
 STAGE_CHECKS = {
-    4: ["document_type", "required_fields", "arithmetic", "net_and_tax", "date", "currency"],
-    5: ["vendor_status", "bank_details"],
-    6: ["po"],
-    7: ["duplicates"],
-    8: ["amount_tolerance"],
+    5: ["document_type", "required_fields", "arithmetic", "net_and_tax", "date", "currency"],
+    6: ["vendor_status", "bank_details"],
+    7: ["po"],
+    8: ["duplicates"],
+    9: ["amount_tolerance", "goods_receipt"],
+}
+# Plain names for each code, for the dashboard and the drafted messages.
+CODE_NAMES = {
+    "RJ-VENDOR": "Blocked vendor", "RJ-PO": "Cancelled PO", "RJ-DUP": "Exact duplicate",
+    "H-READ-NONE": "Not machine-readable", "H-READ-AI": "AI reading to confirm", "H-READ-DISAGREE": "AI and rules read differently",
+    "H-FIELD": "Missing details", "H-OVERRIDE": "Printed value changed", "H-CHECK-NOT-RUN": "A check could not run",
+    "H-DOC": "Not a payable invoice", "H-DATE": "Date problem", "H-ARITH": "Sums do not add up", "H-TAX": "Tax problem",
+    "H-AMOUNT": "Over the PO limit", "H-RECEIPT": "Goods not received", "H-VENDOR": "Vendor not approved",
+    "H-VENDOR-BANK": "Bank details changed", "H-SENDER": "Unknown sender", "H-CURRENCY": "Currency problem",
+    "H-PO-INVALID": "PO problem", "H-PO-NONE": "No PO", "H-DUP-NUMBER": "Possible duplicate", "H-DUP-NEAR": "Possible duplicate",
 }
 FIELD_LABELS = {
     "vendor": "Vendor", "invoice_number": "Invoice number", "invoice_date": "Invoice date", "po_number": "PO number",
@@ -33,8 +44,9 @@ FIELD_LABELS = {
     "document_type": "Document type",
 }
 # Which hold explains the decision first when several fired.
-HOLD_PRIORITY = ["H-READ-NONE", "H-READ-AI", "H-OVERRIDE", "H-VENDOR-BANK", "H-DOC", "H-DUP-NUMBER", "H-DUP-NEAR", "H-AMOUNT",
-                 "H-VENDOR", "H-PO-INVALID", "H-PO-NONE", "H-CURRENCY", "H-FIELD", "H-ARITH", "H-TAX", "H-DATE", "H-CHECK-NOT-RUN"]
+HOLD_PRIORITY = ["H-READ-NONE", "H-READ-AI", "H-OVERRIDE", "H-SENDER", "H-VENDOR-BANK", "H-READ-DISAGREE", "H-DOC", "H-DUP-NUMBER", "H-DUP-NEAR",
+                 "H-AMOUNT", "H-RECEIPT", "H-VENDOR", "H-PO-INVALID", "H-PO-NONE", "H-CURRENCY", "H-FIELD", "H-ARITH", "H-TAX", "H-DATE",
+                 "H-CHECK-NOT-RUN"]
 CENTS = Decimal("0.01")
 
 
@@ -63,7 +75,7 @@ def normalise_po(po):
 
 
 class Evaluation:
-    def __init__(self, fields, vendors, pos, ledger, policy, today, read_source="text_layer"):
+    def __init__(self, fields, vendors, pos, ledger, policy, today, read_source="text_layer", receipts=None, sender=None):
         self.fields = fields
         self.vendors = vendors
         self.pos = pos
@@ -71,6 +83,8 @@ class Evaluation:
         self.policy = policy
         self.today = today
         self.read_source = read_source
+        self.receipts = receipts  # {po_number: [receipt rows]}; None means the receipt data is not available
+        self.sender = sender  # the email address an invoice came from, when it came by email
         self.checks = {}
         self.findings = []  # dict(code, sentence, action, owner)
         self.notes = []
@@ -442,11 +456,70 @@ class Evaluation:
             return self._result("amount_tolerance", "PASS", f"Net {fmt(after)} against a limit of {fmt(limit)}: {fmt(over)} over the PO, inside the {fmt(tolerance)} tolerance.", table=table)
         self._result("amount_tolerance", "PASS", f"Running total {fmt(after)} is within the PO's {fmt(po_net)}. {fmt(po_net - after)} stays open.", table=table)
 
+    def check_goods_receipt(self):
+        """Three-way match: what has been billed on the PO must not run ahead of what has been received."""
+        if self.fired("RJ-DUP"):
+            return self._not_run("goods_receipt", "this invoice is already counted against the PO", "RJ-DUP")
+        if not self.po_ok:
+            cover = next((c for c in ("RJ-PO", "H-PO-NONE", "H-PO-INVALID", "H-VENDOR", "RJ-VENDOR") if self.fired(c)), None)
+            return self._not_run("goods_receipt", "there is no valid PO to compare with", cover)
+        if self.net is None:
+            cover = "H-TAX" if self.fired("H-TAX") else "H-FIELD"
+            return self._not_run("goods_receipt", "the net amount is not known", cover)
+        if self.receipts is None:
+            return self._not_run("goods_receipt", "the goods receipt data is not available")
+        rows = self.receipts.get(self.po_number, [])
+        received = sum((D(r["net_value"]) for r in rows), D(0))
+        billed = self._approved_to_date(self.po_number) + self.net
+        tolerance = min(D(self.po["net_amount"]) * D(self.policy["amount_pct"]), D(self.policy["amount_cap"]))
+        receipt = {"received": str(cents(received)), "billed_after": str(cents(billed)), "receipts": len(rows),
+                   "latest": max((r["received_date"] for r in rows), default=None)}
+        self.numbers.update({"received_to_date": receipt["received"], "billed_after_this_invoice": receipt["billed_after"]})
+        if not rows:
+            sentence = f"No goods receipt has been posted for {self.po_number}, so nothing confirms the goods or services arrived."
+            self._find("H-RECEIPT", sentence, f"Ask {self.buyer()} to confirm receipt in the system, then re-run.")
+            return self._result("goods_receipt", "HOLD", sentence, receipt=receipt)
+        if billed > received + tolerance:
+            short = billed - received
+            sentence = f"Goods received on {self.po_number} are worth {fmt(received)}, but billing would reach {fmt(billed)}: {fmt(short)} more than has arrived."
+            pay_now = received - self._approved_to_date(self.po_number)
+            action = (f"Ask {self.buyer()} whether the rest has arrived. Until receiving confirms it, ask {self.vendor_name()} to bill "
+                      f"{fmt(max(pay_now, D(0)))} now and the rest on delivery.")
+            self._find("H-RECEIPT", sentence, action)
+            return self._result("goods_receipt", "HOLD", sentence, receipt=receipt)
+        count = f"{len(rows)} receipt{'s' if len(rows) != 1 else ''}"
+        self._result("goods_receipt", "PASS", f"Received {fmt(received)} on {self.po_number} ({count}, latest {receipt['latest']}). Billing of {fmt(billed)} is covered.", receipt=receipt)
+
+    def check_sender(self):
+        """Only for invoices that arrived by email: the sender's domain must be the vendor's domain on file."""
+        domain = self.sender.rsplit("@", 1)[-1].lower().strip(" >")
+        if not self.vendor:
+            return self._result("sender", "NOT_RUN", f"Sent from {self.sender}. Not compared because the vendor is not known.")
+        on_file = (self.vendor.get("email_domain") or "").lower()
+        if not on_file:
+            return self._result("sender", "NOT_RUN", f"Sent from {self.sender}. {self.vendor_name()} has no email domain on file.")
+        if domain != on_file and not domain.endswith("." + on_file):
+            sentence = f"This invoice was emailed from {self.sender}, but {self.vendor_name()}'s domain on file is {on_file}."
+            self._find("H-SENDER", sentence, f"Do not reply to that address. Call {self.vendor_name()} on the number on file ({self.vendor['callback_phone']}) to confirm they sent it.")
+            return self._result("sender", "HOLD", sentence)
+        self._result("sender", "PASS", f"Sent from {self.sender}, which matches {self.vendor_name()}'s domain on file.")
+
+    def apply_cross_check(self, differences):
+        """A second, independent reading of the page by Claude. It can only add a hold, never clear one."""
+        if not differences:
+            return
+        parts = [f"{FIELD_LABELS.get(d['field'], d['field'])}: rules read {d['rules']}, Claude read {d['ai']}" for d in differences]
+        self._find("H-READ-DISAGREE", "Two independent readings of this page disagree. " + "; ".join(parts) + ".",
+                   "Look at the highlighted fields on the page. If a reading is wrong, correct it and re-run; if the rules' reading is right, approve with a note.")
+
     # ---- running
     def run_stage(self, stage):
-        for name in STAGE_CHECKS[stage]:
+        names = list(STAGE_CHECKS[stage])
+        if stage == 6 and self.sender:
+            names.append("sender")
+        for name in names:
             getattr(self, f"check_{name}")()
-        return [self.checks[n] for n in STAGE_CHECKS[stage]]
+        return [self.checks[n] for n in names]
 
     def run_all(self):
         # Currency and net compare against the PO, which is looked up in __init__.
@@ -519,7 +592,7 @@ class Evaluation:
             "codes": [f["code"] for f in findings],
             "reasons": [{"code": f["code"], "sentence": f["sentence"], "action": f["action"], "owner": f["owner"]} for f in findings],
             "checks": result,
-            "check_results": [self.checks[c] for c in CHECKS if c in self.checks],
+            "check_results": [self.checks[c] for c in CHECKS + ["sender"] if c in self.checks],
             "next_step": next_step,
             "numbers": self.numbers,
             "notes": notes,
@@ -528,5 +601,5 @@ class Evaluation:
         }
 
 
-def evaluate(fields, vendors, pos, ledger, policy, today, read_source="text_layer"):
-    return Evaluation(fields, vendors, pos, ledger, policy, today, read_source).run_all()
+def evaluate(fields, vendors, pos, ledger, policy, today, read_source="text_layer", receipts=None, sender=None):
+    return Evaluation(fields, vendors, pos, ledger, policy, today, read_source, receipts, sender).run_all()

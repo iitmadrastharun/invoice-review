@@ -307,6 +307,53 @@ def build():
     # S8: no PO printed; exactly one open PO could fit, so it is suggested and never assumed.
     layout_c(LIVE / "S8-implied.pdf", {**LAKESHORE, "number": "LE-8810", "date": "October 27, 2026", "ship_to": "Harbor Office Supply Inc",
              "lines": [("Panel rewiring, Building 2", 1, 2800.00)], "net": 2800.00, "tax": 224.00})
+    # S9: bills the whole PO, but receiving has only booked two of the three pallets.
+    layout_a(LIVE / "S9-receipt.pdf", {**APEX, "number": "AP-7802", "date": "2026-10-29", "po": "PO-4970",
+             "lines": [("AX-PW", "Stretch film pallet kit", 3, 1600.00)], "net": 4800.00, "tax": 384.00}, accent=(0.36, 0.2, 0.45))
+    build_inbox()
+
+
+INBOX = ROOT / "samples" / "inbox"
+# One email per live sample. S6 comes from a look-alike domain, asking for payment to a new account.
+EMAILS = [
+    ("01", "S1-happy.pdf", "Northwind Billing", "billing@northwind-industrial.example", "Invoice INV-00417 for PO-4501", "Tue, 27 Oct 2026 09:12:00 -0400",
+     "Hello,\n\nPlease find attached invoice INV-00417 for PO-4501, including freight.\n\nRegards,\nNorthwind Billing"),
+    ("02", "S2-split.pdf", "Meridian AR", "ar@meridianfacilities.example", "MF-1103: Phase 3 maintenance", "Tue, 27 Oct 2026 10:03:00 -0400",
+     "Hi,\n\nAttached is our invoice for phase 3 of the facilities maintenance work under PO-4620.\n\nThanks,\nMeridian Accounts Receivable"),
+    ("03", "S3-resend.pdf", "Apex Accounts", "accounts@apexpackaging.example", "Invoice for PO-4733", "Tue, 27 Oct 2026 11:40:00 -0400",
+     "Hello,\n\nPlease process the attached invoice for the corrugated shippers on PO-4733.\n\nApex Packaging"),
+    ("04", "S4-scan.pdf", "Cedar Ridge Dispatch", "invoices@cedarridgelogistics.example", "Scanned invoice CR-5520", "Wed, 28 Oct 2026 08:15:00 -0400",
+     "Scanned copy of invoice CR-5520 attached. Original in the post.\n\nCedar Ridge Logistics"),
+    ("05", "S5-no-number.pdf", "Harbor Office Supply", "billing@harboroffice.example", "Copier paper invoice", "Wed, 28 Oct 2026 09:30:00 -0400",
+     "Hi, invoice for the copier paper delivered last week is attached.\n\nHarbor Office Supply"),
+    ("06", "S6-bank.pdf", "Northwind Accounts", "accounts@northwind-industrial-billing.example", "URGENT: updated bank details, invoice INV-00433",
+     "Wed, 28 Oct 2026 16:58:00 -0400",
+     "Dear customer,\n\nPlease note our bank details have changed. Kindly remit payment for the attached invoice to the new account shown on it. "
+     "Our old account is no longer in use.\n\nThis is time sensitive.\n\nNorthwind Accounts"),
+    ("07", "S7-embedded.pdf", "Harbor Office Supply", "billing@harboroffice.example", "Invoice HOS-2291, furniture fit-out", "Thu, 29 Oct 2026 10:20:00 -0400",
+     "Hello, attached is invoice HOS-2291 for the bundled furniture supply and fit-out.\n\nHarbor Office Supply"),
+    ("08", "S8-implied.pdf", "Lakeshore Electrical", "office@lakeshore-electric.example", "Invoice LE-8810", "Thu, 29 Oct 2026 13:05:00 -0400",
+     "Invoice LE-8810 for the panel rewiring in Building 2 is attached.\n\nLakeshore Electrical Contractors"),
+    ("09", "S9-receipt.pdf", "Apex Accounts", "accounts@apexpackaging.example", "Invoice AP-7802, PO-4970 full order", "Fri, 30 Oct 2026 09:45:00 -0400",
+     "Hello,\n\nAttached is our invoice for the full order on PO-4970.\n\nApex Packaging"),
+]
+
+
+def build_inbox():
+    from email.message import EmailMessage
+
+    INBOX.mkdir(parents=True, exist_ok=True)
+    for old in INBOX.glob("*.eml"):
+        old.unlink()
+    for number, pdf, name, address, subject, when, body in EMAILS:
+        msg = EmailMessage()
+        msg["From"] = f"{name} <{address}>"
+        msg["To"] = "ap@halden-mfg.example"
+        msg["Subject"] = subject
+        msg["Date"] = when
+        msg.set_content(body)
+        msg.add_attachment((LIVE / pdf).read_bytes(), maintype="application", subtype="pdf", filename=pdf)
+        (INBOX / f"{number}-{pdf.split('-')[0]}.eml").write_bytes(bytes(msg))
 
 
 if __name__ == "__main__":

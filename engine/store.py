@@ -20,7 +20,8 @@ SCHEMA = """
 CREATE TABLE runs (
   id TEXT PRIMARY KEY, seq INTEGER, case_id TEXT, parent_run_id TEXT, workspace TEXT, file_name TEXT, file_path TEXT,
   sha256 TEXT, read_source TEXT, status TEXT, decision TEXT, final_status TEXT, codes TEXT, clerk_note TEXT, final_by TEXT,
-  fields TEXT, result TEXT, ai_proposal TEXT, error TEXT, started_at TEXT, duration_ms INTEGER
+  fields TEXT, result TEXT, ai_proposal TEXT, error TEXT, started_at TEXT, duration_ms INTEGER,
+  source TEXT, sender TEXT, subject TEXT, batch_id TEXT, cross_check TEXT
 );
 CREATE TABLE stage_events (
   run_id TEXT, stage INTEGER, name TEXT, status TEXT, sentence TEXT, detail TEXT, ms INTEGER, PRIMARY KEY (run_id, stage)
@@ -32,8 +33,10 @@ CREATE TABLE ledger (
   case_id TEXT PRIMARY KEY, workspace TEXT, last_run_id TEXT, vendor_id TEXT, invoice_number TEXT, number_norm TEXT,
   invoice_date TEXT, po_number TEXT, net TEXT, gross TEXT, status TEXT
 );
-CREATE TABLE ai_cache (key TEXT PRIMARY KEY, proposal TEXT, at TEXT);
+CREATE TABLE drafts (run_id TEXT PRIMARY KEY, draft TEXT, at TEXT);
 """
+# Claude's readings survive restarts, so a rehearsed demo does not wait on the same page twice.
+AI_CACHE_SCHEMA = "CREATE TABLE IF NOT EXISTS ai_cache (key TEXT PRIMARY KEY, proposal TEXT, at TEXT)"
 
 
 @contextmanager
@@ -59,6 +62,19 @@ def init():
             conn.executescript(SCHEMA)
 
 
+@contextmanager
+def _cache():
+    VAR.mkdir(exist_ok=True)
+    conn = sqlite3.connect(VAR / "ai_cache.db", timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        with conn:
+            conn.execute(AI_CACHE_SCHEMA)
+            yield conn
+    finally:
+        conn.close()
+
+
 def load_master():
     data = ROOT / "data"
     with open(data / "vendors.csv", newline="", encoding="utf-8") as f:
@@ -68,6 +84,15 @@ def load_master():
     with open(data / "policy.json", encoding="utf-8") as f:
         policy = json.load(f)
     return vendors, pos, policy
+
+
+def load_receipts():
+    """Goods receipts by PO number."""
+    out = {}
+    with open(ROOT / "data" / "receipts.csv", newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            out.setdefault(normalise_po(row["po_number"]), []).append(row)
+    return out
 
 
 def now():
@@ -91,7 +116,7 @@ def stage(run_id, number, name, status, sentence, detail=None, ms=None):
 
 
 def update_run(run_id, **columns):
-    for key in ("fields", "result", "ai_proposal"):
+    for key in ("fields", "result", "ai_proposal", "cross_check"):
         if key in columns and columns[key] is not None:
             columns[key] = json.dumps(columns[key])
     sql = ", ".join(f"{k} = ?" for k in columns)
@@ -101,7 +126,7 @@ def update_run(run_id, **columns):
 
 def _run_dict(row):
     run = dict(row)
-    for key in ("fields", "result", "ai_proposal"):
+    for key in ("fields", "result", "ai_proposal", "cross_check"):
         run[key] = json.loads(run[key]) if run.get(key) else None
     run["codes"] = json.loads(run["codes"]) if run.get("codes") else []
     return run
@@ -167,14 +192,25 @@ def add_change(run_id, field, old_value, old_state, new_value, new_state, who):
 
 
 def cached_ai(key):
-    with _connect() as conn:
+    with _cache() as conn:
         row = conn.execute("SELECT * FROM ai_cache WHERE key = ?", (key,)).fetchone()
     return (json.loads(row["proposal"]), row["at"]) if row else None
 
 
 def cache_ai(key, proposal):
-    with _lock, _connect() as conn:
+    with _lock, _cache() as conn:
         conn.execute("INSERT OR REPLACE INTO ai_cache VALUES (?,?,?)", (key, json.dumps(proposal), now()))
+
+
+def get_draft(run_id):
+    with _connect() as conn:
+        row = conn.execute("SELECT draft FROM drafts WHERE run_id = ?", (run_id,)).fetchone()
+    return json.loads(row["draft"]) if row else None
+
+
+def save_draft(run_id, draft):
+    with _lock, _connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO drafts VALUES (?,?,?)", (run_id, json.dumps(draft), now()))
 
 
 def reset_workspace(workspace):
@@ -183,6 +219,7 @@ def reset_workspace(workspace):
         paths = [r["file_path"] for r in conn.execute("SELECT file_path FROM runs WHERE workspace = ?", (workspace,))]
         conn.execute("DELETE FROM stage_events WHERE run_id IN (SELECT id FROM runs WHERE workspace = ?)", (workspace,))
         conn.execute("DELETE FROM field_changes WHERE run_id IN (SELECT id FROM runs WHERE workspace = ?)", (workspace,))
+        conn.execute("DELETE FROM drafts WHERE run_id IN (SELECT id FROM runs WHERE workspace = ?)", (workspace,))
         conn.execute("DELETE FROM runs WHERE workspace = ?", (workspace,))
         conn.execute("DELETE FROM ledger WHERE workspace = ?", (workspace,))
     return paths

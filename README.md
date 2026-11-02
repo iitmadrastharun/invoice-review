@@ -1,12 +1,26 @@
 # Invoice Review
 
-Takes a vendor invoice PDF and gives an AP clerk an approve, hold or reject decision, with the reason, the numbers and the next step. Every stage shows as it runs, and every run is saved.
+Checks vendor invoices before they are paid. Each invoice comes in by email or upload. It is compared with the vendor master, the PO, goods received and earlier invoices, and the AP clerk gets approve, hold or reject with the reason, the numbers, who acts next and a drafted message. Every stage shows as it runs, and every run is saved.
 
-**The rule behind it:** rules decide, AI only reads scans, and nothing is approved unless every required check actually ran and passed.
+**The rule behind it:** rules decide, AI reads and double-checks, and nothing is approved unless every required check actually ran and passed. AI can stop a payment; it can never make one.
 
-All vendors, POs and invoices are made up. No payment is ever made.
+All vendors, POs, emails and invoices are made up. No payment is ever made.
 
-**Live version:** https://invoice-review-mpwa.onrender.com. It runs on Render's free tier, so the first visit after a quiet spell can take about a minute to wake up. Scans there skip the AI reading and go straight to the form for a person to fill in.
+**Live version:** https://invoice-review-mpwa.onrender.com. It runs on Render's free tier, so the first visit after a quiet spell can take about a minute to wake up. The hosted version has no AI: scans go straight to a form for a person to fill in, and text PDFs are read by the rules alone.
+
+## What it checks
+
+| Stage | Checks |
+|---|---|
+| Receive, read route | Is this a text PDF, a scan or unreadable? Has this exact file been seen before? |
+| Extract fields | Vendor, invoice number, date, PO, subtotal, tax, total, currency, bank account and document type, read by label and position rules |
+| AI cross-check | Claude reads the page independently. If the two readings disagree, the invoice holds |
+| Check document | Is it a payable invoice? Do the sums add up? Is the tax rate the PO's? Is the date sensible? Currency |
+| Check vendor | Approved, blocked or onboarding? Bank account matches the one on file? For emailed invoices, sender's domain matches the vendor's |
+| Find PO | Printed, open and the same vendor's. If none is printed, a PO is suggested, never assumed |
+| Check duplicates | Same number, or the same amount on the same PO close in time |
+| Match PO and receipt | Running total per PO within tolerance (applied once per PO), and billing not ahead of goods received |
+| Decide | Reject only when certain; hold anything a person must settle; approve only when all 12 required checks ran and passed |
 
 ## Start it (Windows)
 
@@ -27,14 +41,19 @@ On macOS or Linux, use `.venv/bin/python` in place of `.venv\Scripts\python`.
 
 ## Use it
 
-1. On **New invoice**, upload a PDF or pick a sample.
-2. Watch the nine stages run, then read the decision card.
-3. If it's on hold, correct the fields and re-run, or make a final decision with a note.
-4. **Dashboard** shows every run. Click a row to reopen it. **Reset demo data** clears your own runs only.
+1. **Inbox:** nine vendor emails with PDFs attached. **Check all new emails** runs them as a batch, in arrival order.
+2. **Check invoices:** upload one PDF to watch it run, several to check them as a batch, or pick a sample.
+3. **Run view:** the ten stages, the decision, who acts next, and **Draft it** for the follow-up message or call note. On a hold, correct fields and re-run, or make a final decision with a note.
+4. **Overview:** straight-through rate, what's waiting, why invoices stop, value stopped, time saved (from stated assumptions), and the ERP payment file export.
+5. **All runs:** every run, with search and filters. **Reset demo data** clears your own runs only.
 
-## Reading scans
+## Where AI is used
 
-Text PDFs are read by rules. A scan is sent to the local `claude -p` command if it is installed and logged in, and `READER_AI` is not `off`. The badge at the top right shows which applies. Without it, a scan gets a blank form for a person to fill in. Either way a scan holds until a person confirms the values, so the decision does not depend on which one read it.
+All through the local `claude -p` command, when it is installed and logged in and `READER_AI` is not `off`. The sidebar shows which applies.
+
+- **Scans:** Claude proposes values, and a person confirms them before any decision counts.
+- **Text PDFs:** Claude reads the page independently, and a disagreement holds the invoice. It starts as soon as a file arrives, a few at a time, so a batch doesn't wait for each one. Readings are cached by file, and the cache survives restarts.
+- **Drafted messages:** a smaller model words the message from facts the rules already settled. A fixed template is used when Claude isn't available. Nothing is ever sent from the app.
 
 ## Tests
 
@@ -45,7 +64,7 @@ Text PDFs are read by rules. A scan is sent to the local `claude -p` command if 
 
 ## Deploying to Render
 
-`render.yaml` describes the service. Connect the repository on Render as a Blueprint. It runs with `READER_AI=off`, and the free tier wipes its disk on restart, which is fine because history rebuilds at startup. If the build fails on Python 3.14, change `PYTHON_VERSION` in `render.yaml` to 3.12.8.
+`render.yaml` describes the service. Connect the repository on Render as a Blueprint. It runs with `READER_AI=off`, and the free tier wipes its disk on restart, which is fine because history rebuilds at startup.
 
 ## Where things are
 
@@ -53,11 +72,15 @@ Text PDFs are read by rules. A scan is sent to the local `claude -p` command if 
 |---|---|
 | `engine/read.py` | Is this PDF text, a scan, or unreadable? |
 | `engine/extract.py` | Reads fields from the text layer with label and position rules |
-| `engine/ai_reader.py` | Asks Claude to read a scan. Proposes values only |
+| `engine/ai_reader.py` | Asks Claude to read a page. Proposes values only |
 | `engine/rules.py` | The decision rules. No PDFs, no AI, no database |
-| `engine/pipeline.py` | Runs the nine stages; clerk corrections and final decisions |
-| `engine/store.py` | SQLite: runs, stages, changes, ledger |
-| `data/` | Vendor master, POs, tolerance policy |
-| `make_samples.py` | Rebuilds every sample PDF |
+| `engine/pipeline.py` | Runs the ten stages, the batch queue and the AI cross-check; clerk corrections and final decisions |
+| `engine/inbox.py` | Reads the `.eml` files that stand in for the AP mailbox |
+| `engine/drafts.py` | The follow-up message: Claude, or a fixed template |
+| `engine/store.py` | SQLite: runs, stages, changes, ledger, drafts, AI cache |
+| `data/` | Vendor master, POs, goods receipts, tolerance policy and time-saved assumptions |
+| `samples/` | History invoices, live samples and the inbox emails |
+| `make_samples.py` | Rebuilds every sample PDF and email |
 | `DEMO.md` | Five-minute walkthrough and interview checklist |
-| `PS1-process-design.md` | The original full design. Some items were cut; see `DEMO.md` |
+| `BUSINESS_CASE.md` | Before and after, what to measure, how to roll it out |
+| `PS1-process-design.md` | The original design |

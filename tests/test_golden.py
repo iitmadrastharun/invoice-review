@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from engine import ai_reader, extract, pipeline, store
+from engine import ai_reader, drafts, extract, inbox, pipeline, store
 
 ROOT = Path(__file__).parent.parent
 LIVE = ROOT / "samples" / "live"
@@ -33,8 +33,8 @@ def fresh(tmp_path, monkeypatch):
         run(pdf, store.REPLAY)
 
 
-def run(path, workspace="w1"):
-    run_id = pipeline.new_run(path, Path(path).name, workspace)
+def run(path, workspace="w1", **meta):
+    run_id = pipeline.new_run(path, Path(path).name, workspace, **meta)
     pipeline.process(run_id, TODAY)
     return store.get_run(run_id)
 
@@ -63,6 +63,7 @@ def test_history_replay():
     ("S6-bank", "HOLD", "H-VENDOR-BANK"),
     ("S7-embedded", "APPROVE", None),
     ("S8-implied", "HOLD", "H-PO-NONE"),
+    ("S9-receipt", "HOLD", "H-RECEIPT"),
 ])
 def test_first_run_of_each_sample(name, decision, code):
     result = run(LIVE / f"{name}.pdf")
@@ -72,7 +73,7 @@ def test_first_run_of_each_sample(name, decision, code):
         assert result["codes"][0] == code, result["codes"]
     else:
         assert result["codes"] == []
-        assert result["result"]["checks"] == {"ran": 11, "of": 11, "not_run": []}
+        assert result["result"]["checks"] == {"ran": 12, "of": 12, "not_run": []}
 
 
 def test_happy_path_numbers():
@@ -93,6 +94,15 @@ def test_ec2_match_passes_and_duplicate_catches():
     assert checks["amount_tolerance"] == "PASS"
     sentence = result["reasons"][0]["sentence"]
     assert "7 days apart" in sentence and "same PO" in sentence and "related invoice number" in sentence
+    # receiving booked one shipment, so a second bill for it runs ahead of what arrived
+    assert result["codes"] == ["H-DUP-NEAR", "H-RECEIPT"]
+
+
+def test_ec4_billed_ahead_of_receipt():
+    result = run(LIVE / "S9-receipt.pdf")["result"]
+    assert result["codes"] == ["H-RECEIPT"]
+    assert result["numbers"]["received_to_date"] == "3200.00" and result["numbers"]["billed_after_this_invoice"] == "4800.00"
+    assert "S. Lindqvist" in result["next_step"]["action"]
 
 
 def test_same_invoice_twice_is_certain_reject_and_shows_file_notice():
@@ -151,11 +161,108 @@ def test_scan_ai_on_and_off_same_decision(monkeypatch):
     assert store.ledger_rows("w1", None) == store.ledger_rows("w2", None)  # neither wrote a row
 
 
-def test_text_pdf_never_calls_ai(monkeypatch):
+# --- Claude's independent second reading of text PDFs
+S1_READ = {
+    "vendor_name": "Northwind Industrial Supply LLC", "tax_id": "84-2291047", "invoice_number": "INV-00417", "invoice_date": "2026-10-26", "po_number": "PO-4501",
+    "subtotal": "12465.00", "tax": "997.20", "total": "13462.20", "currency": "USD", "bank_last4": "4471", "document_type": "invoice",
+}
+
+
+def ai_on(monkeypatch, read):
     monkeypatch.setattr(ai_reader, "available", lambda: True)
-    monkeypatch.setattr(ai_reader, "read_scan", lambda *a: pytest.fail("AI called on a text PDF"))
-    for name in ["S1-happy", "S2-split", "S5-no-number", "S8-implied"]:
-        run(LIVE / f"{name}.pdf")
+    monkeypatch.setattr(ai_reader, "read_scan", read)
+
+
+def as_proposal(values):
+    return {k: {"value": v, "printed_text": v, "page": 1, "legibility": "clear"} for k, v in values.items()}
+
+
+def test_cross_check_agreeing_keeps_approve(monkeypatch):
+    ai_on(monkeypatch, lambda *a: as_proposal(S1_READ))
+    result = run(LIVE / "S1-happy.pdf")
+    assert result["decision"] == "APPROVE"
+    stage = store.get_stages(result["id"])[3]
+    assert stage["status"] == "pass" and "agrees on all 10 fields" in stage["sentence"]
+
+
+def test_cross_check_disagreeing_holds(monkeypatch):
+    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "total": "13426.20"}))
+    result = run(LIVE / "S1-happy.pdf")
+    assert result["decision"] == "HOLD" and result["codes"] == ["H-READ-DISAGREE"]
+    assert "13426.20" in result["result"]["summary"]
+    # the clerk checks the page, finds the rules were right, and approves with a note
+    pipeline.final_decision(result, "approve", "Checked the page: total is 13,462.20 as printed.")
+    assert store.get_run(result["id"])["final_status"] == "approved by clerk"
+
+
+def test_cross_check_failure_does_not_hold(monkeypatch):
+    def fail(*a):
+        raise RuntimeError("no answer within 90 seconds")
+    ai_on(monkeypatch, fail)
+    result = run(LIVE / "S1-happy.pdf")
+    assert result["decision"] == "APPROVE"
+    assert "could not read" in store.get_stages(result["id"])[3]["sentence"]
+
+
+def test_cross_check_only_suggests_what_rules_left_blank(monkeypatch):
+    ai_on(monkeypatch, lambda *a: as_proposal({**S1_READ, "vendor_name": "Lakeshore Electrical Contractors Inc", "tax_id": "61-2207745",
+                                               "invoice_number": "LE-8810", "invoice_date": "2026-10-27", "po_number": "PO-4950",
+                                               "subtotal": "2800.00", "tax": "224.00", "total": "3024.00", "bank_last4": None}))
+    result = run(LIVE / "S8-implied.pdf")
+    assert result["codes"][0] == "H-PO-NONE"  # a suggestion is never used as a value
+    assert "PO-4950" in store.get_stages(result["id"])[3]["sentence"]
+
+
+def test_cross_check_is_cached(monkeypatch):
+    calls = []
+    ai_on(monkeypatch, lambda *a: calls.append(1) or as_proposal(S1_READ))
+    run(LIVE / "S1-happy.pdf", "a")
+    run(LIVE / "S1-happy.pdf", "b")
+    assert len(calls) == 1
+
+
+def test_scan_does_not_get_a_second_reading(monkeypatch):
+    calls = []
+    ai_on(monkeypatch, lambda *a: calls.append(1) or proposal())
+    run(LIVE / "S4-scan.pdf")
+    assert len(calls) == 1  # the one reading a person confirms
+
+
+# --- the inbox
+def test_inbox_lists_every_email():
+    messages = inbox.messages()
+    assert len(messages) == 9 and all(m["attachments"] for m in messages)
+
+
+def test_lookalike_sender_with_new_bank_details(tmp_path):
+    saved, sender, subject = inbox.attachments("06-S6", tmp_path)
+    result = run(saved[0][0], source="email", sender=sender, subject=subject)
+    assert result["codes"][:2] == ["H-SENDER", "H-VENDOR-BANK"]
+
+
+def test_genuine_sender_passes(tmp_path):
+    saved, sender, subject = inbox.attachments("01-S1", tmp_path)
+    result = run(saved[0][0], source="email", sender=sender, subject=subject)
+    assert result["decision"] == "APPROVE"
+    assert any(c["name"] == "sender" and c["status"] == "PASS" for c in result["result"]["check_results"])
+
+
+def test_rerun_keeps_the_sender(tmp_path):
+    saved, sender, subject = inbox.attachments("06-S6", tmp_path)
+    first = run(saved[0][0], source="email", sender=sender, subject=subject)
+    second = rerun(first, bank_last4="4471")
+    assert "H-SENDER" in second["codes"]
+
+
+# --- drafted messages (template; Claude is off in tests)
+def test_drafts_go_to_the_right_person():
+    vendors, pos, policy = store.load_master()
+    s2 = run(LIVE / "S2-split.pdf")
+    d = drafts.draft(s2, vendors["V-1002"], pos["PO-4620"], policy)
+    assert d["kind"] == "buyer" and "M. Okafor" in d["to"] and "350.00" in d["body"] and d["source"] == "template"
+    s6 = run(LIVE / "S6-bank.pdf")
+    d = drafts.draft(s6, vendors["V-1001"], pos["PO-4502"], policy)
+    assert d["kind"] == "call" and "+1 555 0142" in d["to"] and "phone number on file" in d["body"]
 
 
 def test_scan_ai_failure_gives_blank_form(monkeypatch):
@@ -195,7 +302,7 @@ def test_scan_confirmed_by_clerk_approves():
     second = rerun(first, **CLERK)
     assert second["decision"] == "APPROVE" and second["read_source"] == "clerk_entered"
     assert second["case_id"] == first["case_id"]
-    assert second["result"]["checks"]["ran"] == 11
+    assert second["result"]["checks"]["ran"] == 12
 
 
 def test_scan_form_refuses_blank_required_fields():
@@ -302,5 +409,6 @@ def test_unreadable_file(tmp_path):
 def test_stages_all_recorded():
     result = run(LIVE / "S1-happy.pdf")
     stages = store.get_stages(result["id"])
-    assert [s["stage"] for s in stages] == list(range(1, 10))
-    assert all(s["status"] == "pass" for s in stages)
+    assert [s["stage"] for s in stages] == list(range(1, 11))
+    assert all(s["status"] == "pass" for s in stages if s["stage"] != 4)
+    assert stages[3]["status"] == "not_run" and "off" in stages[3]["sentence"]  # AI is off in tests

@@ -9,6 +9,7 @@ from engine import extract, store
 from engine.rules import CHECKS, Evaluation, evaluate, normalise_number
 
 VENDORS, POS, POLICY = store.load_master()
+RECEIPTS = store.load_receipts()
 TODAY = date(2026, 11, 3)
 
 
@@ -32,13 +33,13 @@ def row(vendor="V-1001", number="1", date_="2026-10-26", po="PO-4501", net="1000
             "invoice_date": date_, "po_number": po, "net": net, "gross": gross, "status": status}
 
 
-def decide(fields=None, ledger=(), read_source="text_layer"):
-    return evaluate(fields or clean(), VENDORS, POS, list(ledger), POLICY, TODAY, read_source)
+def decide(fields=None, ledger=(), read_source="text_layer", receipts=RECEIPTS, sender=None):
+    return evaluate(fields or clean(), VENDORS, POS, list(ledger), POLICY, TODAY, read_source, receipts, sender)
 
 
 def test_clean_invoice_approves_with_all_checks():
     out = decide()
-    assert out["decision"] == "APPROVE" and out["checks"]["ran"] == 11
+    assert out["decision"] == "APPROVE" and out["checks"]["ran"] == 12
 
 
 MISSING = f(None, "MISSING")
@@ -85,6 +86,11 @@ MISSING = f(None, "MISSING")
     (clean(po_number=f("PO-4620")), [], "text_layer", "HOLD", "H-PO-INVALID"),  # another vendor's
     (clean(po_number=f("PO-4100")), [], "text_layer", "HOLD", "H-PO-INVALID"),  # closed
     (clean(po_number=MISSING), [], "text_layer", "HOLD", "H-PO-NONE"),
+    # goods receipts: PO-4501 has 12,400.00 received
+    (clean(subtotal=f("12600.00"), tax=f("1008.00"), total=f("13608.00")), [], "text_layer", "APPROVE", None),  # inside the tolerance on both
+    (clean(), [row(number="5", net="3000.00", gross="3240.00")], "text_layer", "HOLD", "H-RECEIPT"),  # 13,000 billed, 12,400 received
+    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("4800.00"), tax=f("384.00"), total=f("5184.00")), [], "text_layer", "HOLD", "H-RECEIPT"),
+    (clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("3200.00"), tax=f("256.00"), total=f("3456.00")), [], "text_layer", "APPROVE", None),
 ])
 def test_decision_table(fields, ledger, read_source, decision, code):
     out = decide(fields, ledger, read_source)
@@ -93,11 +99,58 @@ def test_decision_table(fields, ledger, read_source, decision, code):
         assert code in out["codes"], out["codes"]
 
 
-def test_every_code_has_a_table_row():
+def test_every_code_has_a_test():
+    from engine.rules import CODE_NAMES
     source = Path(__file__).read_text(encoding="utf-8")
-    for code in ["RJ-VENDOR", "RJ-PO", "RJ-DUP", "H-READ-NONE", "H-READ-AI", "H-FIELD", "H-OVERRIDE", "H-CHECK-NOT-RUN", "H-DOC", "H-DATE", "H-ARITH", "H-TAX",
-                 "H-AMOUNT", "H-VENDOR", "H-VENDOR-BANK", "H-CURRENCY", "H-PO-INVALID", "H-PO-NONE", "H-DUP-NUMBER", "H-DUP-NEAR"]:
-        assert f'"{code}"' in source
+    for code in CODE_NAMES:
+        assert f'"{code}"' in source, code
+
+
+def test_po_with_no_receipt_holds():
+    out = decide(receipts={})
+    assert out["decision"] == "HOLD" and out["codes"] == ["H-RECEIPT"]
+    assert "No goods receipt" in out["summary"]
+
+
+def test_receipt_shortfall_names_what_can_be_paid_now():
+    fields = clean(vendor=f("V-1003"), po_number=f("PO-4970"), bank_last4=f("6158"), subtotal=f("4800.00"), tax=f("384.00"), total=f("5184.00"))
+    out = decide(fields)
+    assert "3,200.00" in out["summary"] and "1,600.00 more than has arrived" in out["summary"]
+    assert "bill 3,200.00 now" in out["next_step"]["action"]
+
+
+def test_no_receipt_data_is_a_check_not_run():
+    out = decide(receipts=None)
+    assert out["decision"] == "HOLD" and "H-CHECK-NOT-RUN" in out["codes"] and "goods_receipt" in out["checks"]["not_run"]
+
+
+@pytest.mark.parametrize("sender,decision", [
+    ("billing@northwind-industrial.example", "APPROVE"),
+    ("ap@mail.northwind-industrial.example", "APPROVE"),  # a subdomain of the one on file
+    ("accounts@northwind-industrial-billing.example", "HOLD"),  # look-alike
+    ("northwind.billing@gmail.example", "HOLD"),
+])
+def test_sender_domain(sender, decision):
+    out = decide(sender=sender)
+    assert out["decision"] == decision
+    if decision == "HOLD":
+        assert out["codes"] == ["H-SENDER"] and "+1 555 0142" in out["next_step"]["action"]
+    assert out["checks"]["ran"] == 12  # the sender check is extra, not one of the twelve
+
+
+def test_sender_and_bank_change_together_lead_with_sender():
+    out = decide(clean(bank_last4=f("9931")), sender="accounts@northwind-industrial-billing.example")
+    assert out["codes"][:2] == ["H-SENDER", "H-VENDOR-BANK"]
+
+
+def test_ai_disagreement_holds_and_agreement_does_not():
+    ev = Evaluation(clean(), VENDORS, POS, [], POLICY, TODAY, "text_layer", RECEIPTS)
+    ev.apply_cross_check([{"field": "total", "rules": "10800.00", "ai": "10080.00"}])
+    out = ev.run_all()
+    assert out["decision"] == "HOLD" and out["codes"] == ["H-READ-DISAGREE"] and "10080.00" in out["summary"]
+    ev = Evaluation(clean(), VENDORS, POS, [], POLICY, TODAY, "text_layer", RECEIPTS)
+    ev.apply_cross_check([])
+    assert ev.run_all()["decision"] == "APPROVE"
 
 
 @pytest.mark.parametrize("check", CHECKS)
